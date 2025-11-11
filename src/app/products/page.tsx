@@ -5,6 +5,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 // TODO: 定义一个 Product 类型（可以先用 any 顶着）
 // type Product = { ... };
@@ -36,7 +37,9 @@ export default function ProductsPage() {
       {/* TODO: 用 products.map 渲染列表 */}
       {productList.map((product) => (
         <div key={product.id}>
-          <h2>{product.name}</h2>
+          <Link href={`products/${product.id}`}>
+            <h2>{product.name}</h2>
+          </Link>
           <p>{product.description}</p>
           <p>${product.priceCad} CAD</p>
           <p>

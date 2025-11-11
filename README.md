@@ -44,3 +44,23 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 /products → fetches data from the API and renders it
 
 That means your frontend and backend just connected for the first time — browser → API → data response.
+
+## Step 1B:
+
+✅ Testing after completion
+
+Visit /products, then click on a product.
+
+It should navigate to /product/1, /product/2, etc., showing the corresponding product details.
+
+The page should display the content correctly.
+
+💡 If you see “Loading...” flash briefly before the details appear → it’s working correctly.
+
+🔍 What you’ll learn in this stage
+
+Skill Practical Meaning
+Dynamic routing [id] You’ll be able to build any kind of “detail page” or “user page.”
+useParams The standard way to read URL parameters.
+fetch + find The logic behind filtering and retrieving data.
+Component navigation (Link) The foundation of how routes and pages connect.
