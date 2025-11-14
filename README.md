@@ -103,3 +103,23 @@ Next, we want this API to start pulling real data from the database.
 | Database Connection    | ✔ Configured with Pool + environment variables                                    |
 | Frontend Page          | ✔ Reused as-is, no structural changes needed                                      |
 | Technical Breakthrough | ✅ You successfully rendered dynamic data from a real database for the first time |
+
+## Step 2B:
+
+In 2A the setup is:
+
+/api/products → fetch all products from the database ✅
+
+/products → product list page ✅
+
+/product/[id] → the detail page is still doing fetch("/api/products") and then find ❌ (kind of crude)
+
+We want to change it to:
+
+/api/products/[id] → handles a single product
+
+/product/[id] → directly requests /api/products/:id
+
+Now this part has finished:
+
+Database → API (list + single) → Frontend pages (list + detail).
