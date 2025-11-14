@@ -37,6 +37,8 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Step 1A:
 
+Goal: use fake data(API) to fetch data! In another words, use api as database to return data!
+
 ✅ You’ve made it happen:
 
 /api/products → returns JSON
@@ -47,6 +49,7 @@ That means your frontend and backend just connected for the first time — brows
 
 ## Step 1B:
 
+Goal: make frontend able to talk to backend(through API!)
 ✅ Testing after completion
 
 Visit /products, then click on a product.
@@ -67,6 +70,8 @@ Component navigation (Link) The foundation of how routes and pages connect.
 
 ## Step 1C:
 
+Goal: making cart function working!
+
 ✅ Test this out!
 
 Open /product/1 → Click “Add to Cart”
@@ -79,7 +84,22 @@ Click “Remove” → Check if the item can be deleted
 
 🧭 After completing this, you’ll have learned:
 
-Concept Practical Meaning
-Context / Provider A way to share state across multiple pages
-Custom Hook (useCart) A good habit for encapsulating reusable logic
-State update logic (setCart(prev => ...)) The core of React’s “immutable updates” concept
+| Concept                                         | Practical Meaning                                |
+| ----------------------------------------------- | ------------------------------------------------ |
+| **Context / Provider**                          | A clean way to share state across multiple pages |
+| **Custom Hook (`useCart`)**                     | A good habit for organizing and reusing logic    |
+| **State update logic (`setCart(prev => ...)`)** | The core idea behind React’s immutable updates   |
+
+## Step 2A:
+
+🧭 Stage Goal
+
+So far, your /api/products endpoint has only been returning a dummy array.
+Next, we want this API to start pulling real data from the database.
+
+| Part                   | Status                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| Backend API            | ✔ Updated to read from the database                                               |
+| Database Connection    | ✔ Configured with Pool + environment variables                                    |
+| Frontend Page          | ✔ Reused as-is, no structural changes needed                                      |
+| Technical Breakthrough | ✅ You successfully rendered dynamic data from a real database for the first time |
