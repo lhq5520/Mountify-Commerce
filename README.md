@@ -123,3 +123,24 @@ We want to change it to:
 Now this part has finished:
 
 Database → API (list + single) → Frontend pages (list + detail).
+
+## Step 2C:
+
+Overall Goal:
+
+On the /cart page, the user clicks a “Checkout” button →
+send a POST request to /api/orders →
+the backend writes the order and order items into Neon →
+returns an orderId →
+the frontend clears the cart and shows a success message.
+
+Now:
+
+At this point, you already have:
+
+✅ Products: listing and detail pages, both reading from the database
+✅ Cart: managed with Context and shared across the entire app
+✅ Checkout: /cart → POST /api/orders → Neon writes to orders & order_items
+✅ Simple admin panel: /admin/orders to view all orders
+
+This is already a fully functional end-to-end e-commerce MVP — just missing payments and real user management.
