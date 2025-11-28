@@ -1,4 +1,12 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is a ecommerce website - still under development. the following step record how this website was constructed
+
+## Technical Stack
+
+- **Frontend:** Next.js 16 (App Router), React, TypeScript
+- **Backend:** Next.js API Routes
+- **Database:** PostgreSQL (Neon)
+- **Payment:** Stripe Checkout + Webhooks
+- **Dev Tools:** Stripe CLI
 
 ## Getting Started
 
@@ -16,24 +24,14 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Potential Optimization：
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+checkout status - now using polling to check status -> can be optimized using websocket/SSE
 
-## Learn More
+security update
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- price verification from backend instead of trusing frontend
+- payment verification (making sure user actually paid)
 
 ## Step 1A:
 
@@ -196,3 +194,517 @@ No session validation on success page
 Status
 ✅ Functional for testing and learning
 ⚠️ Not production-ready - requires database price validation and webhook integration
+
+# Step 3A: Stripe Checkout with Webhook Integration
+
+## Overview
+
+Implemented a complete payment flow using Stripe Checkout with webhook-based order status tracking. This integration creates a production-ready payment system where orders are created with pending status and automatically updated to paid status via Stripe webhooks.
+
+---
+
+## Goals
+
+- Integrate Stripe Checkout for secure payment processing
+- Implement webhook-based order confirmation (asynchronous payment verification)
+- Build real-time order status polling on the success page
+- Maintain proper order lifecycle management (pending → paid)
+- Learn production-grade security practices (signature verification, server-side validation)
+
+---
+
+## What Was Implemented
+
+### 1. Database Schema Updates
+
+**File:** Neon PostgreSQL Console
+
+Added two new columns to the `orders` table:
+
+```sql
+ALTER TABLE orders
+ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'pending',
+ADD COLUMN stripe_session_id TEXT NOT NULL;
+```
+
+**Purpose:**
+
+- `status`: Track order lifecycle (pending/paid/cancelled)
+- `stripe_session_id`: Link orders to Stripe Checkout Sessions
+
+---
+
+### 2. Backend API Modifications
+
+#### A. Modified `/api/checkout/route.ts`
+
+**Changes:**
+
+- Creates a pending order in the database **before** redirecting to Stripe
+- Stores Stripe Session ID with the order for webhook correlation
+- Validates and transforms cart data into Stripe's `line_items` format
+
+**Flow:**
+
+```typescript
+1. Receive cart data from frontend
+2. Validate items exist
+3. Create Stripe Checkout Session
+4. Create order in database with status='pending' and stripe_session_id
+5. Insert order_items for each product
+6. Return session.url to frontend
+```
+
+**Key code snippet:**
+
+```typescript
+const session = await stripe.checkout.sessions.create({...});
+
+// Create pending order
+const orderRes = await query(
+  "INSERT INTO orders (email, total_cad, status, stripe_session_id) VALUES ($1, $2, $3, $4) RETURNING id",
+  [email, total, "pending", session.id]
+);
+```
+
+---
+
+#### B. Created `/api/webhooks/stripe/route.ts`
+
+**Purpose:** Receive payment confirmation from Stripe and update order status
+
+**Security Implementation:**
+
+- Webhook signature verification using `stripe.webhooks.constructEvent()`
+- Validates requests are genuinely from Stripe (not spoofed)
+- Uses `STRIPE_WEBHOOK_SECRET` for signature validation
+
+**Event Handling:**
+
+```typescript
+switch (event.type) {
+  case "checkout.session.completed":
+    if (session.payment_status === "paid") {
+      await query(
+        "UPDATE orders SET status = $1 WHERE stripe_session_id = $2",
+        ["paid", session.id]
+      );
+    }
+    break;
+}
+```
+
+**Why POST method?**
+
+- Stripe actively sends data to our server
+- Not a GET request where we query Stripe
+- Webhook = "Stripe calls us" not "we call Stripe"
+
+---
+
+#### C. Created `/api/orders/session/[sessionId]/route.ts`
+
+**Purpose:** Query order status for polling mechanism
+
+**Implementation:**
+
+```typescript
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ sessionId: string }> }
+) {
+  const { sessionId } = await params; // Next.js 15 requirement
+
+  const result = await query(
+    "SELECT id, status, email, total_cad FROM orders WHERE stripe_session_id = $1",
+    [sessionId]
+  );
+
+  return NextResponse.json({
+    orderId: order.id,
+    status: order.status,
+    ...
+  });
+}
+```
+
+**Next.js 15 Note:** `params` is now a Promise and must be awaited
+
+---
+
+### 3. Frontend Implementation
+
+#### A. Modified `/cart/page.tsx`
+
+**Changes:**
+
+- Added `handleStripeCheckout` function
+- Sends complete cart data (including product names) to `/api/checkout`
+- Redirects to Stripe hosted payment page using `window.location.href`
+
+**Key code:**
+
+```typescript
+const data = await res.json();
+window.location.href = data.url; // Redirect to Stripe
+```
+
+---
+
+#### B. Modified `/checkout/success/page.tsx`
+
+**Implemented polling mechanism to check order status**
+
+**Initial Implementation (Had Bugs):**
+
+```typescript
+// ❌ BUGGY VERSION - caused infinite loops
+useEffect(() => {
+  const timerId = setInterval(checkOrderStatus, 2000);
+  return () => clearInterval(timerId);
+}, [sessionId, status, attemptCount]); // Problem: dependencies cause re-runs
+```
+
+**Final Implementation (Fixed):**
+
+```typescript
+useEffect(() => {
+  if (!sessionId) return;
+
+  let isMounted = true;
+  let timerId: NodeJS.Timeout;
+
+  const checkOrderStatus = async () => {
+    if (!isMounted) return;
+
+    setAttemptCount((prev) => {
+      const newCount = prev + 1;
+      if (newCount >= 15) clearInterval(timerId);
+      return newCount;
+    });
+
+    const data = await res.json();
+    setError(null); // Clear previous errors
+    setStatus(data.status);
+
+    if (data.status === "paid") {
+      clearInterval(timerId);
+    }
+  };
+
+  checkOrderStatus();
+  timerId = setInterval(checkOrderStatus, 2000);
+
+  return () => {
+    isMounted = false;
+    clearInterval(timerId);
+  };
+}, [sessionId]); // Only depends on sessionId
+```
+
+**Display Logic:**
+
+- Pending + attempts < 15: Show "⏳ Confirming payment..."
+- Paid: Show "✅ Payment Successful!" with Order ID
+- Pending + attempts >= 15: Show timeout warning
+- Error: Show error message
+
+---
+
+### 4. Local Development Setup
+
+#### Stripe CLI Installation & Configuration
+
+**Purpose:** Forward Stripe webhooks to localhost during development
+
+**Windows Installation:**
+
+```bash
+scoop bucket add stripe https://github.com/stripe/scoop-stripe-cli.git
+scoop install stripe
+```
+
+**Start webhook forwarding:**
+
+```bash
+stripe login
+stripe listen --forward-to localhost:3000/api/webhooks/stripe
+```
+
+**Environment Variables:**
+
+```env
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...  # From Stripe CLI output
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+```
+
+**Important:** Restart Next.js dev server after updating `.env.local`
+
+---
+
+## Technical Architecture
+
+### Complete Payment Flow
+
+```
+1. User clicks "Checkout" button
+   ↓
+2. Frontend sends cart data to POST /api/checkout
+   ↓
+3. Backend:
+   - Calls Stripe API to create Checkout Session
+   - Creates order in DB with status='pending'
+   - Returns session.url
+   ↓
+4. Frontend redirects to Stripe payment page (window.location.href)
+   ↓
+5. User enters card info and completes payment on Stripe
+   ↓
+6. Two things happen simultaneously:
+
+   A. Stripe redirects user to /checkout/success?session_id=xxx
+      ↓
+      Success page starts polling every 2 seconds
+      ↓
+      Calls GET /api/orders/session/{sessionId}
+      ↓
+      Displays status
+
+   B. Stripe sends webhook to POST /api/webhooks/stripe
+      ↓
+      Webhook verifies signature
+      ↓
+      Updates order: status='pending' → 'paid'
+      ↓
+      Next poll detects status='paid'
+      ↓
+      Shows "Payment Successful!"
+```
+
+---
+
+## Key Learning Points
+
+### 1. Security Concepts
+
+**Why two API keys?**
+
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`: Safe to expose in frontend (limited permissions)
+- `STRIPE_SECRET_KEY`: Must stay on server (full access to Stripe account)
+
+**Why verify webhook signatures?**
+
+- Prevent spoofed requests pretending to be Stripe
+- Uses cryptographic signature with shared secret
+- Stripe SDK handles verification: `stripe.webhooks.constructEvent()`
+
+**Why validate prices on backend?**
+
+- Frontend can be manipulated via browser DevTools
+- Users could change prices before checkout
+- Backend should be the "source of truth"
+
+---
+
+### 2. Asynchronous Payment Confirmation
+
+**Understanding the timing:**
+
+```
+User clicks Pay → Payment processes (1-2s) → Two events:
+├─→ Browser redirect (immediate)
+└─→ Webhook sent (1-5s typically)
+```
+
+**Why polling is necessary:**
+
+- Frontend doesn't know when webhook arrives
+- Can't directly listen to webhook (server-to-server)
+- Polling bridges the gap between redirect and webhook processing
+
+**Polling strategy:**
+
+- Check every 2 seconds
+- Stop after 15 attempts (30 seconds timeout)
+- Stop immediately when status='paid'
+
+---
+
+### 3. React useEffect Deep Dive
+
+**The Infinite Loop Bug:**
+
+**Problem:** Including state that changes inside the effect in the dependency array
+
+```typescript
+// ❌ Creates infinite loop
+useEffect(() => {
+  setCount(count + 1);
+}, [count]); // count changes → effect reruns → count changes → ...
+```
+
+**Solution:** Only depend on values that don't change
+
+```typescript
+// ✅ Runs once
+useEffect(() => {
+  setCount((prev) => prev + 1);
+}, []); // No dependencies
+```
+
+**In our polling implementation:**
+
+- `status` and `attemptCount` change during polling
+- Including them in dependencies causes effect to restart
+- Timers get cleared and recreated constantly
+- Solution: Only depend on `sessionId` (never changes)
+
+**Closure trap in timers:**
+
+```typescript
+const [status, setStatus] = useState("pending");
+
+useEffect(() => {
+  const timer = setInterval(() => {
+    console.log(status); // Always "pending" - stale closure!
+  }, 1000);
+}, []);
+```
+
+**Solution:** Use fresh values from API response, not state
+
+```typescript
+const data = await fetch(...);
+if (data.status === "paid") { // Use fresh value
+  clearInterval(timer);
+}
+```
+
+---
+
+### 4. Next.js 15 Changes
+
+**Dynamic Route Parameters:**
+
+```typescript
+// ❌ Old way (Next.js 14)
+export async function GET(req, { params }) {
+  const { id } = params;
+}
+
+// ✅ New way (Next.js 15)
+export async function GET(
+  req,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params; // Must await
+}
+```
+
+---
+
+## Issues Encountered & Solutions
+
+### Issue 1: WSL Network Isolation
+
+**Problem:** Stripe CLI in WSL couldn't connect to Next.js on Windows
+
+```
+[ERROR] Failed to POST: dial tcp 127.0.0.1:3000: connect: connection refused
+```
+
+**Root Cause:**
+
+- WSL's `localhost` ≠ Windows's `localhost`
+- Network namespaces are isolated
+
+**Solution:** Run both Stripe CLI and Next.js in same environment (both on Windows native)
+
+---
+
+### Issue 2: Polling Never Stops
+
+**Problem:** Success page continues polling even after payment confirmed
+
+**Root Cause:**
+
+```typescript
+useEffect(() => {
+  // ...
+}, [sessionId, status, attemptCount]);
+// status changes → effect restarts → timer recreated → loop continues
+```
+
+**Solution:** Remove changing dependencies, use fresh values from API
+
+---
+
+### Issue 3: Error Messages Persist
+
+**Problem:** Network error shown once, never clears even after successful queries
+
+**Root Cause:** React state doesn't auto-clear
+
+```typescript
+setError("Network error"); // Sets error
+// Later...
+setStatus("paid"); // Error still exists!
+```
+
+**Solution:** Explicitly clear error on success
+
+```typescript
+if (success) {
+  setError(null); // Must explicitly clear
+}
+```
+
+---
+
+## Testing Checklist
+
+✅ Add products to cart  
+✅ Click checkout → redirects to Stripe  
+✅ Enter test card: `4242 4242 4242 4242`  
+✅ Complete payment  
+✅ Verify redirect to success page  
+✅ Verify polling shows "Confirming..."  
+✅ Verify status changes to "Payment Successful!" with Order ID  
+✅ Check Stripe CLI logs for webhook events  
+✅ Verify database: order status = 'paid'
+
+**Cancel flow:**  
+✅ Start checkout → Cancel on Stripe page → Returns to /cart
+
+---
+
+## Current Limitations & Future Improvements
+
+**Current state:**
+
+- ⚠️ Trusts frontend-provided prices (security issue)
+- ⚠️ No `paid_at` timestamp tracking
+- ⚠️ Polling could be replaced with Server-Sent Events (more efficient)
+- ⚠️ No user authentication (all orders use test email)
+
+**Next steps:**
+
+- Implement database price validation
+- Add user authentication system
+- Improve error handling and retry logic
+- Add order confirmation emails
+- Implement refund handling
+
+---
+
+## Status
+
+✅ **Functional for learning and testing**  
+⚠️ **Not production-ready** - requires:
+
+- Database price validation
+- User authentication
+- Real email confirmation
+- Better error handling

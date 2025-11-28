@@ -1,6 +1,6 @@
 // src/app/api/products/[id]/route.ts
 import { NextResponse } from "next/server";
-import { query } from "../../../../lib/db";
+import { query } from "@/lib/db";
 
 // 第二个参数叫 context，里面的 params 是一个 Promise
 export async function GET(

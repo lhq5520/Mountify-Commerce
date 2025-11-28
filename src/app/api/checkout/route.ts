@@ -1,5 +1,8 @@
+// api/checkout
+
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { query } from "@/lib/db"; // use for order insertion when checkout
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2025-11-17.clover",
@@ -50,6 +53,31 @@ export async function POST(req: Request) {
     cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/cart`,
     customer_email: body.email,
     });
+
+    // create orders with sessionid - updated logic in step3A before that was api/orders directly to insert tables
+    const email = body.email ?? null;  // get the email first
+
+    //calculate total
+    const total = body.items.reduce(
+      (sum, item) => sum + item.priceCad * item.quantity, 
+      0
+    );
+
+    //insert into "orders" table
+    const orderRes = await query(
+      "INSERT INTO orders (email, total_cad, status, stripe_session_id) VALUES ($1, $2, $3, $4) RETURNING id",
+      [email, total, "pending", session.id]
+    );
+
+    const orderId = orderRes.rows[0].id as number;
+
+    //insert into "orders_items" table
+    for (const item of body.items) {
+      await query(
+        "INSERT INTO order_items (order_id, product_id, quantity, price_cad) VALUES ($1, $2, $3, $4)",
+        [orderId, item.productId, item.quantity, item.priceCad]
+      );
+    }
 
     return NextResponse.json({ url: session.url });
     
