@@ -35,7 +35,6 @@ export async function GET(
     name: row.name,
     // JSON 里 price_cad 是字符串，这里转成 number 给前端用
     priceCad: Number(row.price_cad),
-    car: row.car,
     description: row.description,
   };
 

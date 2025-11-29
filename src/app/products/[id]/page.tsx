@@ -12,8 +12,9 @@ interface Product {
   id: number;
   name: string;
   priceCad: number;
-  car: string;
   description: string;
+  image_url: string;
+  image_url_hover: string;
 }
 
 export default function ProductDetailPage() {
@@ -41,9 +42,7 @@ export default function ProductDetailPage() {
     <main style={{ padding: "20px" }}>
       <h1>{product.name}</h1>
       <p>{product.description}</p>
-      <p>
-        <b>Car:</b> {product.car}
-      </p>
+
       <p>${product.priceCad} CAD</p>
       <button
         onClick={() => {

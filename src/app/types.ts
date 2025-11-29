@@ -2,6 +2,7 @@ export interface Product {
   id: number;
   name: string;
   priceCad: number;
-  car: string;
   description: string;
+  image_url: string;
+  image_url_hover: string;
 }
