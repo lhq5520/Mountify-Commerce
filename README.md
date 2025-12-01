@@ -712,6 +712,10 @@ if (success) {
 
 # Version 3A: UI/UX Complete Redesign
 
+## Iuuse:
+
+Dark mode currently has been disabled since it has been found that font may look tricky at the moment. will work on dark mode later.
+
 ## Overview
 
 Completed a comprehensive UI/UX overhaul of the entire e-commerce application, establishing a production-ready design system inspired by premium brands (MyProtein, Verve Coffee, Pure Cycles, Apple). The redesign prioritizes visual refinement, smooth interactions, and a cohesive user experience across all pages.
@@ -1585,7 +1589,7 @@ preconnect to fonts.googleapis.com  // DNS prefetch
 
 ```css
 will-change: transform,
-  opacity // GPU acceleration hint;
+  opacity // GPU acceleration hint;;
 ```
 
 ### CSS Layer Organization

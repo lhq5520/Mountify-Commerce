@@ -20,7 +20,9 @@
     --radius-full: 9999px;
   }
 
-  @media (prefers-color-scheme: dark) {
+  /* Temporarily disable automatic dark mode to keep colors
+     consistent across macOS and Windows. Dark mode currently have some issue */
+  /* @media (prefers-color-scheme: dark) {
     :root {
       --color-text-primary: #F5F5F7;
       --color-text-secondary: #86868B;
@@ -31,7 +33,7 @@
       --color-primary: #0A84FF;
       --color-primary-hover: #007AFF;
     }
-  }
+  } */
 
   html {
     scroll-behavior: smooth;
