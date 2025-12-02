@@ -34,9 +34,7 @@ export default function CartPage() {
           email: "test@example.com", // TODO: replace with real user email
           items: cart.map((item) => ({
             productId: item.id,
-            name: item.name,
             quantity: item.quantity,
-            priceCad: item.priceCad,
           })),
         }),
       });

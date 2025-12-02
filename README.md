@@ -1795,3 +1795,932 @@ Mobile-first grid with progressive enhancement works better than desktop-first:
 - **Verve Coffee**: Clean typography, generous spacing, minimal navigation
 - **Pure Cycles**: Product card styling, aspect ratios, subtle shadows
 - **Apple**: Overall refinement, micro-interactions, color palette, font smoothing
+
+# Version 3B: Security Enhancement - Price Validation
+
+## Overview
+
+Implemented server-side price validation to prevent price manipulation attacks. The backend now serves as the single source of truth for all product pricing, eliminating the critical security vulnerability where frontend-provided prices were trusted without verification.
+
+---
+
+## Problem Statement
+
+### Critical Security Vulnerability
+
+**Before Step 3B:**
+Both `/api/checkout` and `/api/orders` endpoints trusted price data sent from the frontend:
+
+```typescript
+// Frontend sends
+{
+  items: [{ productId: 1, name: "Product A", priceCad: 1299.99, quantity: 1 }];
+}
+
+// Backend directly uses frontend price
+const total = body.items.reduce(
+  (sum, item) => sum + item.priceCad * item.quantity,
+  0
+);
+```
+
+### Attack Vector
+
+**Exploit scenario:**
+
+1. Attacker opens browser DevTools (F12)
+2. Modifies cart state or intercepts network request
+3. Changes `priceCad: 1299.99` to `priceCad: 0.01`
+4. Proceeds to checkout
+5. Backend accepts manipulated price
+6. Attacker purchases $1,299.99 item for $0.01
+
+**Impact:**
+
+- Direct financial loss
+- Data integrity compromise
+- Potential fraud at scale
+- Violation of payment processor terms
+
+---
+
+## Solution Architecture
+
+### Core Principle: Backend as Single Source of Truth
+
+**New flow:**
+
+```
+Frontend sends: { productId, quantity }
+           ↓
+Backend queries database for real price
+           ↓
+Backend validates product existence
+           ↓
+Backend calculates total using database prices
+           ↓
+Creates Stripe Session / Order with verified prices
+```
+
+**Security guarantees:**
+
+- ✅ Prices always fetched from database (cannot be manipulated)
+- ✅ Product existence validated before processing
+- ✅ Frontend cannot influence pricing logic
+- ✅ Complete audit trail (database queries logged)
+
+---
+
+## Implementation Details
+
+### 1. Type Definition Changes
+
+**File:** `/api/checkout/route.ts`
+
+**Before:**
+
+```typescript
+type CheckoutItem = {
+  productId: number;
+  name: string; // ❌ Frontend-provided
+  priceCad: number; // ❌ Frontend-provided (security risk!)
+  quantity: number;
+};
+```
+
+**After:**
+
+```typescript
+type CheckoutItem = {
+  productId: number; // ✅ Only ID
+  quantity: number; // ✅ Only quantity
+  // No price or name - backend will fetch from database
+};
+```
+
+**Rationale:** Minimize attack surface by accepting only essential identifiers
+
+---
+
+### 2. Database Query Implementation
+
+**Added batch query logic:**
+
+```typescript
+// Step 1: Extract all product IDs from cart
+const requestedIds = body.items.map((item) => item.productId);
+// Example: [1, 5, 8]
+
+// Step 2: Batch query - fetch all products in one database call
+const result = await query(
+  "SELECT id, price_cad, name FROM products WHERE id = ANY($1)",
+  [requestedIds]
+);
+```
+
+**Why `ANY($1)` instead of `IN (...)`?**
+
+- `ANY($1)` is PostgreSQL's parameterized query syntax
+- Prevents SQL injection
+- Allows passing array as single parameter
+
+**Performance benefit:**
+
+- Before: N database queries (one per product)
+- After: 1 database query (batch fetch)
+- Example: 10 products → 90% reduction in DB calls
+
+---
+
+### 3. Product Existence Validation
+
+**Validation logic:**
+
+```typescript
+// Step 3: Verify all requested products were found
+const foundIds = result.rows.map((row) => row.id);
+const missingIds = requestedIds.filter((id) => !foundIds.includes(id));
+
+if (missingIds.length > 0) {
+  return NextResponse.json(
+    { error: `Products not found: ${missingIds.join(", ")}` },
+    { status: 400 }
+  );
+}
+```
+
+**What this catches:**
+
+- Deleted products still in old cart sessions
+- Malicious requests with fabricated product IDs
+- Race conditions (product deleted between page load and checkout)
+
+**Error response example:**
+
+```json
+{
+  "error": "Products not found: 999, 1001"
+}
+```
+
+---
+
+### 4. Efficient Price Lookup with Map
+
+**Why use Map instead of array lookups?**
+
+**Array lookup (inefficient):**
+
+```typescript
+// Time complexity: O(N × M)
+for (const item of body.items) {
+  // N iterations
+  const product = result.rows.find((row) => row.id === item.productId); // M comparisons each
+}
+// Total: N × M comparisons
+```
+
+**Map lookup (efficient):**
+
+```typescript
+// Build index once: O(M)
+const productMap = new Map<number, { price_cad: number; name: string }>();
+for (const row of result.rows) {
+  productMap.set(row.id, { price_cad: row.price_cad, name: row.name });
+}
+
+// Fast lookups: O(N)
+for (const item of body.items) {
+  const product = productMap.get(item.productId); // O(1) lookup
+}
+// Total: O(M + N)
+```
+
+**Performance comparison:**
+
+- 10 products: Array = 100 ops, Map = 20 ops (5x faster)
+- 100 products: Array = 10,000 ops, Map = 200 ops (50x faster)
+
+---
+
+### 5. Price Calculation with Database Values
+
+**Updated lineItems generation:**
+
+**Before (insecure):**
+
+```typescript
+const lineItems = body.items.map((item) => ({
+  quantity: item.quantity,
+  price_data: {
+    product_data: {
+      name: item.name, // ❌ Frontend value
+    },
+    unit_amount: Math.round(item.priceCad * 100), // ❌ Frontend value
+  },
+}));
+```
+
+**After (secure):**
+
+```typescript
+const lineItems = body.items.map((item) => {
+  const product = productMap.get(item.productId)!; // Database lookup
+
+  return {
+    quantity: item.quantity,
+    price_data: {
+      currency: "cad",
+      product_data: {
+        name: product.name, // ✅ Database value
+      },
+      unit_amount: Math.round(product.price_cad * 100), // ✅ Database value
+    },
+  };
+});
+```
+
+**Non-null assertion (`!`) safety:**
+
+- Safe because we validated all products exist above
+- If product missing, request already rejected with 400 error
+- Map.get() guaranteed to return value for validated IDs
+
+---
+
+**Updated total calculation:**
+
+**Before:**
+
+```typescript
+const total = body.items.reduce(
+  (sum, item) => sum + item.priceCad * item.quantity, // ❌ Frontend value
+  0
+);
+```
+
+**After:**
+
+```typescript
+const total = body.items.reduce((sum, item) => {
+  const product = productMap.get(item.productId)!;
+  return sum + product.price_cad * item.quantity; // ✅ Database value
+}, 0);
+```
+
+---
+
+**Updated order_items insertion:**
+
+**Before:**
+
+```typescript
+await query(
+  "INSERT INTO order_items (order_id, product_id, quantity, price_cad) VALUES ($1, $2, $3, $4)",
+  [orderId, item.productId, item.quantity, item.priceCad] // ❌ Frontend value
+);
+```
+
+**After:**
+
+```typescript
+for (const item of body.items) {
+  const product = productMap.get(item.productId)!;
+
+  await query(
+    "INSERT INTO order_items (order_id, product_id, quantity, price_cad) VALUES ($1, $2, $3, $4)",
+    [orderId, item.productId, item.quantity, product.price_cad] // ✅ Database value
+  );
+}
+```
+
+---
+
+### 6. Frontend Request Updates
+
+**File:** `src/app/cart/page.tsx`
+
+**Modified `handleStripeCheckout` to send minimal data:**
+
+**Before:**
+
+```typescript
+body: JSON.stringify({
+  email: "test@example.com",
+  items: cart.map((item) => ({
+    productId: item.id,
+    name: item.name, // ❌ Unnecessary
+    quantity: item.quantity,
+    priceCad: item.priceCad, // ❌ Security risk
+  })),
+});
+```
+
+**After:**
+
+```typescript
+body: JSON.stringify({
+  email: "test@example.com",
+  items: cart.map((item) => ({
+    productId: item.id,
+    quantity: item.quantity,
+    // Only essential identifiers - backend fetches rest
+  })),
+});
+```
+
+**Benefits:**
+
+- Smaller request payload
+- Clearer separation of concerns (frontend = UI, backend = business logic)
+- Impossible to manipulate prices via client
+
+---
+
+### 7. Code Cleanup
+
+**Deleted deprecated endpoint:**
+
+- Removed `/api/orders/route.ts` (POST method)
+- This was the "fake checkout" from Step 2C before Stripe integration
+- No longer used after `/api/checkout` implementation
+- `/api/admin/orders` (GET endpoint) remains for admin panel
+
+**Rationale:**
+
+- Eliminate code duplication
+- Single checkout flow reduces maintenance burden
+- Clearer architecture (one way to create orders)
+
+---
+
+## Security Test Results
+
+### Test 1: Normal Flow ✅
+
+**Procedure:**
+
+1. Add products to cart via UI
+2. Proceed to checkout
+3. Inspect network request in DevTools
+
+**Observed:**
+
+```json
+{
+  "email": "test@example.com",
+  "items": [
+    { "productId": 1, "quantity": 2 },
+    { "productId": 5, "quantity": 1 }
+  ]
+}
+```
+
+**Verification:**
+
+- ✅ No `priceCad` field in request
+- ✅ No `name` field in request
+- ✅ Payment completes successfully
+- ✅ Correct total charged via Stripe
+
+---
+
+### Test 2: Price Manipulation Attempt ✅
+
+**Procedure:**
+Manually send request with fake price via browser console:
+
+```javascript
+fetch("/api/checkout", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    email: "attacker@test.com",
+    items: [{ productId: 1, quantity: 1, priceCad: 0.01, name: "Fake" }],
+  }),
+});
+```
+
+**Result:**
+
+- ✅ Backend ignores `priceCad` and `name` fields (type definition prevents acceptance)
+- ✅ Fetches real price from database
+- ✅ Charges correct amount via Stripe
+
+**Conclusion:** Attack vector neutralized
+
+---
+
+### Test 3: Invalid Product ID ✅
+
+**Procedure:**
+Request non-existent product:
+
+```javascript
+fetch("/api/checkout", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    email: "test@test.com",
+    items: [{ productId: 999999, quantity: 1 }],
+  }),
+});
+```
+
+**Response:**
+
+```json
+{
+  "error": "Products not found: 999999"
+}
+```
+
+**Verification:**
+
+- ✅ Request rejected with 400 status
+- ✅ Descriptive error message
+- ✅ No database writes occurred
+- ✅ No Stripe Session created
+
+---
+
+## Technical Deep Dive
+
+### Array vs Map Performance Analysis
+
+**Problem:** Need to lookup product info for each cart item
+
+**Scenario:** Cart with 10 items, database returns 10 product records
+
+**Approach A: Array.find() in loop**
+
+```typescript
+for (const item of body.items) {
+  // 10 iterations
+  const product = result.rows.find((row) => row.id === item.productId);
+  // Each find() scans entire array (worst case: 10 comparisons)
+}
+// Total operations: 10 × 10 = 100 comparisons
+// Time complexity: O(N²)
+```
+
+**Approach B: Map for indexed access**
+
+```typescript
+// Build Map once
+const productMap = new Map();
+for (const row of result.rows) {
+  // 10 iterations
+  productMap.set(row.id, row);
+}
+
+// Fast lookups
+for (const item of body.items) {
+  // 10 iterations
+  const product = productMap.get(item.productId); // O(1) lookup
+}
+// Total operations: 10 + 10 = 20 operations
+// Time complexity: O(N + M)
+```
+
+**Performance gain:**
+
+- Small carts (5 items): 5x faster
+- Large carts (50 items): 50x faster
+- Production scale (100+ items): Critical performance difference
+
+---
+
+### SQL Injection Prevention
+
+**Why `ANY($1)` is secure:**
+
+**Vulnerable (hypothetical):**
+
+```typescript
+// ❌ String concatenation - SQL injection risk
+const query = `SELECT * FROM products WHERE id IN (${ids.join(",")})`;
+```
+
+**Secure (implemented):**
+
+```typescript
+// ✅ Parameterized query - SQL injection impossible
+query("SELECT ... WHERE id = ANY($1)", [requestedIds]);
+```
+
+**PostgreSQL's `ANY` operator:**
+
+- Accepts array parameter
+- Database handles array expansion safely
+- Equivalent to `IN (...)` but parameterized
+
+---
+
+### Validation Logic: Finding Missing Products
+
+**Algorithm:**
+
+```typescript
+// Set theory approach
+requested = [1, 5, 999]    // What frontend wants
+found = [1, 5]              // What database has
+missing = requested - found // Set difference
+       = [999]              // Products that don't exist
+```
+
+**Implementation:**
+
+```typescript
+const missingIds = requestedIds.filter((id) => !foundIds.includes(id));
+```
+
+**Why this matters:**
+
+- Prevents partial order creation (all-or-nothing principle)
+- Returns descriptive error (tells user which products failed)
+- Maintains data integrity (no orphaned records)
+
+---
+
+## Files Modified
+
+### 1. `/api/checkout/route.ts`
+
+**Changes:**
+
+- Modified `CheckoutItem` type (removed `name` and `priceCad`)
+- Added database query for product validation
+- Implemented Map-based lookup structure
+- Updated `lineItems` generation to use database prices
+- Updated `total` calculation to use database prices
+- Updated `order_items` insertion to use database prices
+
+**Lines of code:** ~40 lines added/modified
+
+---
+
+### 2. `/cart/page.tsx`
+
+**Changes:**
+
+- Modified `handleStripeCheckout` request body
+- Removed `name` and `priceCad` from items array
+- Simplified data structure sent to backend
+
+**Lines of code:** ~5 lines modified
+
+---
+
+### 3. `/api/orders/route.ts`
+
+**Action:** File deleted entirely
+
+**Rationale:**
+
+- POST method was deprecated after Stripe integration
+- Functionality merged into `/api/checkout`
+- GET method lives in `/api/admin/orders` (separate file)
+- Reduces code duplication and maintenance burden
+
+---
+
+## Code Quality Improvements
+
+### 1. Batch Database Queries
+
+**Before (hypothetical inefficient approach):**
+
+```typescript
+for (const item of body.items) {
+  const result = await query("SELECT price_cad FROM products WHERE id = $1", [
+    item.productId,
+  ]);
+  // N database round trips
+}
+```
+
+**After (optimized):**
+
+```typescript
+const result = await query(
+  "SELECT id, price_cad, name FROM products WHERE id = ANY($1)",
+  [requestedIds]
+);
+// Single database round trip
+```
+
+**Benefits:**
+
+- Reduced database load
+- Lower latency (one network round trip vs N)
+- Better connection pool utilization
+- Atomic data snapshot (all prices from same moment)
+
+---
+
+### 2. Map Data Structure Usage
+
+**Why Map over Object?**
+
+**Map advantages:**
+
+```typescript
+// Type-safe key-value pairs
+const map = new Map<number, ProductData>();
+
+// O(1) lookup by product ID
+map.get(productId);
+
+// No prototype pollution
+// No string coercion of keys
+// Better performance for frequent lookups
+```
+
+**vs Object:**
+
+```typescript
+// Keys always strings (need string conversion)
+const obj: Record<string, ProductData> = {};
+
+// Prototype chain lookup overhead
+obj[productId]; // productId coerced to string
+```
+
+---
+
+### 3. Comprehensive Error Handling
+
+**Validation checkpoints:**
+
+```typescript
+// Checkpoint 1: Empty cart
+if (!body.items || body.items.length === 0) {
+  return NextResponse.json({ error: "No items to checkout" }, { status: 400 });
+}
+
+// Checkpoint 2: Products exist
+if (missingIds.length > 0) {
+  return NextResponse.json(
+    { error: `Products not found: ${missingIds.join(", ")}` },
+    { status: 400 }
+  );
+}
+
+// Checkpoint 3: Database/Stripe errors
+try {
+  // Main logic
+} catch (e: any) {
+  console.error("Error creating checkout session:", e);
+  return NextResponse.json(
+    { error: "Failed to create checkout session" },
+    { status: 500 }
+  );
+}
+```
+
+**Error response format consistency:**
+
+- Always includes `error` field
+- Descriptive messages for debugging
+- Appropriate HTTP status codes (400 vs 500)
+
+---
+
+## Security Verification Tests
+
+### Test Suite
+
+**Test 1: Normal checkout flow**
+
+- ✅ Add products via UI
+- ✅ Proceed to checkout
+- ✅ Verify correct prices charged
+- ✅ Order created with database prices
+
+**Test 2: Price manipulation attempt**
+
+- ✅ Send request with fake price via DevTools
+- ✅ Backend ignores manipulated price
+- ✅ Database price used instead
+- ✅ Correct amount charged
+
+**Test 3: Invalid product ID**
+
+- ✅ Request non-existent product (ID: 999999)
+- ✅ Returns 400 error
+- ✅ Descriptive error message
+- ✅ No order created
+- ✅ No Stripe Session created
+
+**Test 4: Mixed valid/invalid products**
+
+- ✅ Request [valid_id, valid_id, invalid_id]
+- ✅ Entire request rejected (all-or-nothing)
+- ✅ Error lists specific missing IDs
+
+**Test 5: Deleted product in cart**
+
+- ✅ Add product to cart
+- ✅ Delete product from database
+- ✅ Attempt checkout
+- ✅ Gracefully rejected with clear error
+
+---
+
+## Before/After Comparison
+
+### Attack Surface
+
+**Before:**
+
+```
+Attacker control: productId, quantity, price, name
+Risk level: CRITICAL (direct price manipulation)
+```
+
+**After:**
+
+```
+Attacker control: productId, quantity
+Risk level: LOW (can only request products that exist)
+```
+
+---
+
+### Data Flow
+
+**Before:**
+
+```
+Cart → Frontend calculates total → Sends to backend → Backend trusts values
+       ↑ Manipulable at every step
+```
+
+**After:**
+
+```
+Cart → Frontend sends IDs only → Backend queries DB → Backend calculates
+                                  ↑ Single source of truth
+```
+
+---
+
+### Code Maintainability
+
+**Before:**
+
+- Price logic duplicated (frontend calculation + backend)
+- Risk of inconsistency
+- Need to sync price changes across layers
+
+**After:**
+
+- Price logic centralized in database
+- Single place to update prices
+- Frontend is purely presentational
+
+---
+
+## Performance Impact
+
+### Database Query Optimization
+
+**Metrics:**
+
+- Queries per checkout: 1 (batch query)
+- vs potential N queries (if done naively)
+- For 10-item cart: 90% reduction in DB calls
+
+### In-Memory Lookup Optimization
+
+**Map construction overhead:**
+
+- One-time cost: O(M) where M = number of products
+- Amortized across all cart items
+- Worth it for carts with 3+ items
+
+**Overall performance:**
+
+- Negligible impact on small carts (< 5 items)
+- Significant improvement for large carts (10+ items)
+- Better scalability for production loads
+
+---
+
+## Remaining Security Considerations
+
+### ✅ Addressed in this step
+
+- Price manipulation via frontend
+- Product existence validation
+- SQL injection prevention (parameterized queries)
+- Webhook signature verification (from Step 2D)
+
+### ⚠️ Still pending (future work)
+
+- **User authentication:** No verification that email belongs to requester
+- **Rate limiting:** No protection against checkout spam
+- **Inventory validation:** No check for stock availability
+- **Quantity limits:** No validation of reasonable quantities (could order 9999 items)
+- **CSRF protection:** Not implemented (Next.js API routes vulnerable)
+- **Session validation on success page:** Still doesn't verify payment truly succeeded
+
+---
+
+## Architecture Patterns Learned
+
+### 1. Defense in Depth
+
+- Type system enforces structure (TypeScript)
+- Database query validates existence
+- Price fetched from authoritative source
+- Multiple validation checkpoints
+
+### 2. Principle of Least Privilege
+
+- Frontend only sends what it knows (IDs, quantities)
+- Backend has access to sensitive data (prices)
+- Clear trust boundaries
+
+### 3. Fail-Fast Validation
+
+- Validate early (before expensive operations)
+- Reject entire request on any validation failure
+- Prevents partial state / data corruption
+
+### 4. Single Source of Truth
+
+- Database is authoritative for prices
+- No client-side calculations trusted
+- Eliminates synchronization issues
+
+---
+
+## Code Review Insights
+
+### What We Learned
+
+**1. Trust boundaries:**
+
+- Never trust client input for critical business logic
+- Always validate against server-side data
+- Assume all frontend data is potentially malicious
+
+**2. Batch operations:**
+
+- Prefer single batch query over N individual queries
+- Reduces latency and database load
+- Use parameterized queries for security
+
+**3. Data structure selection:**
+
+- Choose appropriate structures (Map vs Array)
+- Consider lookup patterns when designing logic
+- Optimize for common case (frequent lookups → Map)
+
+**4. Error handling:**
+
+- Specific error messages aid debugging
+- Appropriate HTTP status codes
+- Fail fast, fail explicitly
+
+---
+
+## Next Steps
+
+### Recommended Priority Order
+
+**Step 3C: Currency Standardization (Optional)**
+
+- Rename `price_cad` → `price_usd` throughout codebase
+- Update Stripe currency setting
+- Convert existing prices (if needed)
+- Update all display text (CAD → USD)
+
+**Step 4: User Authentication System (High Priority)**
+
+- User registration/login
+- Session management
+- Associate orders with authenticated users
+- "My Orders" page for users
+- Protected checkout (require login)
+
+**Step 5: Additional Security Hardening**
+
+- Inventory validation (prevent overselling)
+- Rate limiting on checkout endpoint
+- CSRF token implementation
+- Email verification before checkout
+- Success page payment verification (query Stripe API with session_id)
+
+---
+
+## Status
+
+✅ **Production-ready from security perspective (pricing)**  
+✅ **Performance optimized (batch queries, Map lookups)**  
+✅ **Code cleaned up (removed deprecated endpoints)**  
+⚠️ **User authentication still required for production deployment**
+
+---

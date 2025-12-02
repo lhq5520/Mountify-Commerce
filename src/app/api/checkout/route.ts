@@ -8,10 +8,9 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2025-11-17.clover",
 });
 
+//step3b updated - for security purpose, we only need quantity and productID from frontend
 type CheckoutItem = {
   productId: number;
-  name: string;
-  priceCad: number;
   quantity: number;
 };
 
@@ -32,36 +31,68 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    // updated in step3b - querry to check price from backend
+    const requestedIds = body.items.map((item) => item.productId);
+
+      //updated in step3b - database curry
+    const result = await query(
+      "SELECT id, price_cad, name FROM products WHERE id = ANY($1)",
+      [requestedIds]
+    );
+
+    // updated in step3b - verify if we have the product
+    const foundIds = result.rows.map((row: { id: number }) => row.id)!;
+    const missingIds = requestedIds.filter(id => !foundIds.includes(id));
+
+    if (missingIds.length > 0) {
+      return NextResponse.json(
+        { error: `Products not found: ${missingIds.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    // updated in step3b - if product exists，build a map for quick search
+    // Ex.const product = productMap.get(1); -> { price: 29.99, name: "productA" }
+    const productMap = new Map<number, { price_cad: number; name: string }>();
+    for (const row of result.rows) {
+      productMap.set(row.id, { price_cad: row.price_cad, name: row.name });
+    }
     
     // 3.implement stripe
+      //updated in step3b- using productMap, which returns from backend to create LineItem
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
-    body.items.map((item) => ({
-    quantity: item.quantity,
-    price_data: {
-      currency: "cad",
-      product_data: {
-        name: item.name,
-      },
-      unit_amount: Math.round(item.priceCad * 100),
-        },
-    }));
+      body.items.map((item) => {
+        const product = productMap.get(item.productId)!;
+      
+        return {  
+          quantity: item.quantity,
+          price_data: {
+            currency: "cad",
+            product_data: {
+              name: product.name,
+            },
+            unit_amount: Math.round(product.price_cad * 100),
+          },
+        };
+      });
 
     const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    line_items: lineItems,
-    success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/cart`,
-    customer_email: body.email,
+      mode: "payment",
+      line_items: lineItems,
+      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/cart`,
+      customer_email: body.email,
     });
 
     // create orders with sessionid - updated logic in step3A before that was api/orders directly to insert tables
     const email = body.email ?? null;  // get the email first
 
-    //calculate total
-    const total = body.items.reduce(
-      (sum, item) => sum + item.priceCad * item.quantity, 
-      0
-    );
+    //updated in step3b - calculate total
+    const total = body.items.reduce((sum, item) => {
+      const product = productMap.get(item.productId)!;
+      return sum + product.price_cad * item.quantity;  // ← price from db
+    }, 0);
 
     //insert into "orders" table
     const orderRes = await query(
@@ -72,10 +103,13 @@ export async function POST(req: Request) {
     const orderId = orderRes.rows[0].id as number;
 
     //insert into "orders_items" table
+    // updated in step3b - 
     for (const item of body.items) {
+      const product = productMap.get(item.productId)!;
+
       await query(
         "INSERT INTO order_items (order_id, product_id, quantity, price_cad) VALUES ($1, $2, $3, $4)",
-        [orderId, item.productId, item.quantity, item.priceCad]
+        [orderId, item.productId, item.quantity, product.price_cad]
       );
     }
 
