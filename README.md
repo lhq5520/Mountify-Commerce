@@ -2689,7 +2689,7 @@ Cart → Frontend sends IDs only → Backend queries DB → Backend calculates
 
 ## Next Steps
 
-### Recommended Priority Order
+### Potential Priority Order
 
 **Step 3C: Currency Standardization (Optional)**
 
