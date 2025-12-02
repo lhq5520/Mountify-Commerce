@@ -32,6 +32,23 @@ export async function POST(req: Request) {
       );
     }
 
+    // updated in step3b - validate quantity range to avoid abuse
+    for (const item of body.items) {
+      if (typeof item.quantity !== "number" || !Number.isInteger(item.quantity)) {
+        return NextResponse.json(
+          { error: "Invalid quantity format" },
+          { status: 400 }
+        );
+      }
+
+      if (item.quantity < 1 || item.quantity > 1000) {
+        return NextResponse.json(
+          { error: "Quantity must be between 1 and 1000" },
+          { status: 400 }
+        );
+      }
+    }
+
     // updated in step3b - querry to check price from backend
     const requestedIds = body.items.map((item) => item.productId);
 
