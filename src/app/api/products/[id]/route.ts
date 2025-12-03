@@ -2,12 +2,12 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
-// 第二个参数叫 context，里面的 params 是一个 Promise
+// The second parameter is context, where params is a Promise
 export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const { id: rawId } = await context.params; // ★ 这里要 await
+  const { id: rawId } = await context.params; // ★ await is required here
 
   const id = Number(rawId);
 
@@ -33,8 +33,8 @@ export async function GET(
   const product = {
     id: row.id,
     name: row.name,
-    // JSON 里 price_cad 是字符串，这里转成 number 给前端用
-    priceCad: Number(row.price_cad),
+    // price is a string in JSON, convert to number for frontend
+    price: Number(row.price),
     description: row.description,
   };
 

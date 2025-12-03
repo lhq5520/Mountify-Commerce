@@ -10,10 +10,7 @@ export default function CartPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const total = cart.reduce(
-    (sum, item) => sum + item.priceCad * item.quantity,
-    0
-  );
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   async function handleStripeCheckout() {
     if (cart.length === 0) {
@@ -116,13 +113,13 @@ export default function CartPage() {
                       Quantity: {item.quantity}
                     </p>
                     <p className="text-xs text-[var(--color-text-secondary)]">
-                      Unit price: ${item.priceCad.toFixed(2)} CAD
+                      Unit price: ${item.price.toFixed(2)} USD
                     </p>
                   </div>
 
                   <div className="flex flex-col items-end gap-2">
                     <p className="text-sm font-semibold text-[var(--color-text-primary)]">
-                      ${(item.priceCad * item.quantity).toFixed(2)} CAD
+                      ${(item.price * item.quantity).toFixed(2)} USD
                     </p>
                     <button
                       onClick={() => removeFromCart(item.id)}
@@ -147,7 +144,7 @@ export default function CartPage() {
                   Subtotal
                 </span>
                 <span className="font-medium text-[var(--color-text-primary)]">
-                  ${total.toFixed(2)} CAD
+                  ${total.toFixed(2)} USD
                 </span>
               </div>
 

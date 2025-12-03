@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 type Order = {
   id: number;
   email: string | null;
-  total_cad: string;
+  total: string;
   created_at: string;
 };
 
@@ -113,7 +113,7 @@ export default function AdminOrdersPage() {
                       </td>
                       <td className="px-4 py-3 text-right align-middle">
                         <span className="font-medium text-[var(--color-text-primary)]">
-                          ${Number.parseFloat(o.total_cad || "0").toFixed(2)}
+                          ${Number.parseFloat(o.total || "0").toFixed(2)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right align-middle">

@@ -9,7 +9,7 @@ import { useCart } from "@/app/context/CartContext";
 interface Product {
   id: number;
   name: string;
-  priceCad: number;
+  price: number;
   description: string;
   detailed_description: string;
   image_url: string;
@@ -131,10 +131,7 @@ export default function ProductDetailPage() {
             </p>
 
             <p className="mt-5 text-xl font-semibold text-[var(--color-text-primary)]">
-              ${product.priceCad.toFixed(2)}{" "}
-              <span className="text-sm font-normal text-[var(--color-text-secondary)]">
-                CAD
-              </span>
+              ${product.price.toFixed(2)}
             </p>
 
             {/* Add to cart section */}

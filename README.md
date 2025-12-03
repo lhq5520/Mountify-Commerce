@@ -2837,3 +2837,109 @@ Cart → Frontend sends IDs only → Backend queries DB → Backend calculates
 ⚠️ **User authentication still required for production deployment**
 
 ---
+
+# Version 3C:Currency Standardization (CAD → USD)
+
+## Overview
+
+Standardized the application to use USD as the base currency and simplified database field naming. Changed from `price_cad`/`total_cad` to `price`/`total` for cleaner code and consistency.
+
+---
+
+## Changes Made
+
+### 1. Database Schema
+
+```sql
+-- Renamed columns in all tables
+ALTER TABLE products RENAME COLUMN price_cad TO price;
+ALTER TABLE order_items RENAME COLUMN price_cad TO price;
+ALTER TABLE orders RENAME COLUMN total_cad TO total;
+```
+
+**Decision:** Kept numeric values unchanged (test data)
+
+- Example: 29.99 CAD → 29.99 USD
+- No currency conversion applied
+- Only unit labels changed
+
+---
+
+### 2. Backend APIs
+
+**Modified files:**
+
+- `/api/checkout/route.ts`
+- `/api/orders/session/[sessionId]/route.ts`
+- `/api/admin/orders/route.ts` (if exists)
+
+**Changes:**
+
+- SQL queries: `price_cad` → `price`, `total_cad` → `total`
+- Map types: `{ price_cad: number }` → `{ price: number }`
+- All references: `product.price_cad` → `product.price`
+- Stripe currency: `"cad"` → `"usd"`
+
+---
+
+### 3. Frontend
+
+**Type definitions:**
+
+```typescript
+// Changed in all Product interfaces
+priceCad: number → priceUsd: number
+```
+
+**Files updated:**
+
+- `/products/page.tsx`
+- `/products/[id]/page.tsx`
+- `/cart/page.tsx`
+- `/context/CartContext.tsx`
+
+**Display text:**
+
+```typescript
+// Before
+${product.priceCad.toFixed(2)} CAD
+
+// After
+$${product.priceUsd.toFixed(2)}
+// or
+$${product.priceUsd.toFixed(2)} USD
+```
+
+---
+
+## Rationale
+
+**Why USD?**
+
+- International standard for e-commerce
+- Stripe's default currency
+- Simpler for global customers
+
+**Why simplify field names?**
+
+- `price` is clearer than `price_cad`
+- Easier to change currency in future (just update display, not schema)
+- Less typing, cleaner code
+
+---
+
+## Testing
+
+✅ Product listing displays prices correctly  
+✅ Product detail shows correct price  
+✅ Cart calculations accurate  
+✅ Stripe checkout shows USD  
+✅ Payment processes successfully  
+✅ Database stores correct totals  
+✅ No undefined/NaN errors
+
+---
+
+## Status
+
+✅ **Complete** - All currency references standardized to USD

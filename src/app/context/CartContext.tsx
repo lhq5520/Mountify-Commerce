@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, ReactNode } from "react";
-import type { Product } from "../types"; // 如果还没有 types.ts，就先注释掉
+import type { Product } from "../types"; // If you don't have types.ts yet, comment this out
 
 interface CartItem extends Product {
   quantity: number;
@@ -23,12 +23,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setCart((prev) => {
       const existing = prev.find((p) => p.id === product.id);
       if (existing) {
-        // 如果已存在，就 +1
+        // If already exists, increment quantity by 1
         return prev.map((p) =>
           p.id === product.id ? { ...p, quantity: p.quantity + 1 } : p
         );
       }
-      // 否则新增
+      // Otherwise, add as new item
       return [...prev, { ...product, quantity: 1 }];
     });
   };
@@ -48,7 +48,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// 自定义 hook：让组件更方便调用
+// Custom hook: makes it easier for components to use the cart
 export function useCart() {
   const context = useContext(CartContext);
   if (!context) {

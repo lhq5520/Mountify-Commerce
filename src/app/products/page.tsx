@@ -7,7 +7,7 @@ import Image from "next/image";
 interface Product {
   id: number;
   name: string;
-  priceCad: number;
+  price: number;
   description: string;
   detailed_description: string;
   image_url: string;
@@ -121,7 +121,7 @@ export default function ProductsPage() {
                       </h2>
                     </div>
                     <p className="text-sm font-semibold text-[var(--color-text-primary)] whitespace-nowrap">
-                      ${product.priceCad.toFixed(2)} CAD
+                      ${product.price.toFixed(2)}
                     </p>
                   </div>
 

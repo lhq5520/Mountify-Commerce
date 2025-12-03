@@ -54,7 +54,7 @@ export async function POST(req: Request) {
 
       //updated in step3b - database curry
     const result = await query(
-      "SELECT id, price_cad, name FROM products WHERE id = ANY($1)",
+      "SELECT id, price, name FROM products WHERE id = ANY($1)",
       [requestedIds]
     );
 
@@ -71,9 +71,9 @@ export async function POST(req: Request) {
 
     // updated in step3b - if product exists，build a map for quick search
     // Ex.const product = productMap.get(1); -> { price: 29.99, name: "productA" }
-    const productMap = new Map<number, { price_cad: number; name: string }>();
+    const productMap = new Map<number, { price: number; name: string }>();
     for (const row of result.rows) {
-      productMap.set(row.id, { price_cad: row.price_cad, name: row.name });
+      productMap.set(row.id, { price: row.price, name: row.name });
     }
     
     // 3.implement stripe
@@ -85,11 +85,11 @@ export async function POST(req: Request) {
         return {  
           quantity: item.quantity,
           price_data: {
-            currency: "cad",
+            currency: "usd",
             product_data: {
               name: product.name,
             },
-            unit_amount: Math.round(product.price_cad * 100),
+            unit_amount: Math.round(product.price * 100),
           },
         };
       });
@@ -108,12 +108,12 @@ export async function POST(req: Request) {
     //updated in step3b - calculate total
     const total = body.items.reduce((sum, item) => {
       const product = productMap.get(item.productId)!;
-      return sum + product.price_cad * item.quantity;  // ← price from db
+      return sum + product.price * item.quantity;  // ← price from db
     }, 0);
 
     //insert into "orders" table
     const orderRes = await query(
-      "INSERT INTO orders (email, total_cad, status, stripe_session_id) VALUES ($1, $2, $3, $4) RETURNING id",
+      "INSERT INTO orders (email, total, status, stripe_session_id) VALUES ($1, $2, $3, $4) RETURNING id",
       [email, total, "pending", session.id]
     );
 
@@ -125,8 +125,8 @@ export async function POST(req: Request) {
       const product = productMap.get(item.productId)!;
 
       await query(
-        "INSERT INTO order_items (order_id, product_id, quantity, price_cad) VALUES ($1, $2, $3, $4)",
-        [orderId, item.productId, item.quantity, product.price_cad]
+        "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES ($1, $2, $3, $4)",
+        [orderId, item.productId, item.quantity, product.price]
       );
     }
 

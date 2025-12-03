@@ -11,7 +11,7 @@ export async function GET(
 
     // querry the order by session id
     const result = await query(
-      "SELECT id, status, email, total_cad FROM orders WHERE stripe_session_id = $1",
+      "SELECT id, status, email, total FROM orders WHERE stripe_session_id = $1",
       [sessionId]
     );
 
@@ -29,7 +29,7 @@ export async function GET(
       orderId: order.id,
       status: order.status,
       email: order.email,
-      total: order.total_cad,
+      total: order.total,
     });
 
   } catch (e: any) {
