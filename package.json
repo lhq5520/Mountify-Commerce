@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "stripe-webhook":"stripe listen --forward-to localhost:3000/api/webhooks/stripe",
+    "stripe-webhook": "stripe listen --forward-to localhost:3000/api/webhooks/stripe",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "baseline-browser-mapping": "^2.8.32",
+    "bcryptjs": "^3.0.3",
     "lucide-react": "^0.555.0",
     "next": "16.0.1",
+    "next-auth": "^5.0.0-beta.30",
     "pg": "^8.16.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",
@@ -21,6 +23,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

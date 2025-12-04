@@ -1,5 +1,6 @@
 import "./globals.css";
 import { CartProvider } from "@/app/context/CartContext";
+import { SessionProvider } from "next-auth/react";
 import Navbar from "@/app/components/Navbar";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
@@ -35,27 +36,29 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <CartProvider>
-          <div className="flex min-h-screen flex-col">
-            {/* Global Navigation */}
-            <Navbar />
+        <SessionProvider>
+          <CartProvider>
+            <div className="flex min-h-screen flex-col">
+              {/* Global Navigation */}
+              <Navbar />
 
-            {/* Main Content Area */}
-            <main className="flex-1">{children}</main>
+              {/* Main Content Area */}
+              <main className="flex-1">{children}</main>
 
-            {/* Footer (optional - can add later) */}
-            <footer className="bg-white border-t border-[var(--color-border)]">
-              <div className="container-custom py-8">
-                <div className="text-center text-[var(--color-text-secondary)] text-sm">
-                  <p>
-                    &copy; {new Date().getFullYear()} Mountify. All rights
-                    reserved.
-                  </p>
+              {/* Footer (optional - can add later) */}
+              <footer className="bg-white border-t border-[var(--color-border)]">
+                <div className="container-custom py-8">
+                  <div className="text-center text-[var(--color-text-secondary)] text-sm">
+                    <p>
+                      &copy; {new Date().getFullYear()} Mountify. All rights
+                      reserved.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </footer>
-          </div>
-        </CartProvider>
+              </footer>
+            </div>
+          </CartProvider>
+        </SessionProvider>
       </body>
     </html>
   );
