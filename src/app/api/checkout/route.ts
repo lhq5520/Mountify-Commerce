@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { query } from "@/lib/db"; // use for order insertion when checkout
+import { auth } from "@/auth";  // ← use for user validation
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2025-11-17.clover",
@@ -21,6 +22,7 @@ type CheckoutBody = {
 
 export async function POST(req: Request) {
   try {
+    const usersession = await auth();
     // 1. parse the JSON
     const body = await req.json() as CheckoutBody
     
@@ -103,7 +105,9 @@ export async function POST(req: Request) {
     });
 
     // create orders with sessionid - updated logic in step3A before that was api/orders directly to insert tables
-    const email = body.email ?? null;  // get the email first
+    // updated in step4a- now using session to send user email and potentially userID
+    const email = usersession?.user?.email || body.email || null;
+    const userId = usersession?.user?.id ? parseInt(usersession.user.id) : null;
 
     //updated in step3b - calculate total
     const total = body.items.reduce((sum, item) => {
@@ -113,8 +117,8 @@ export async function POST(req: Request) {
 
     //insert into "orders" table
     const orderRes = await query(
-      "INSERT INTO orders (email, total, status, stripe_session_id) VALUES ($1, $2, $3, $4) RETURNING id",
-      [email, total, "pending", session.id]
+      "INSERT INTO orders (email, total, status, stripe_session_id, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      [email, total, "pending", session.id, userId]
     );
 
     const orderId = orderRes.rows[0].id as number;

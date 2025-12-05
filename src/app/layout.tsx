@@ -2,6 +2,7 @@ import "./globals.css";
 import { CartProvider } from "@/app/context/CartContext";
 import { SessionProvider } from "next-auth/react";
 import Navbar from "@/app/components/Navbar";
+import Toast from "@/app/components/Toast";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 
@@ -57,6 +58,7 @@ export default function RootLayout({
                 </div>
               </footer>
             </div>
+            <Toast />
           </CartProvider>
         </SessionProvider>
       </body>

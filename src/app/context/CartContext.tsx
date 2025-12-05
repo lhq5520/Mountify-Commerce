@@ -12,12 +12,19 @@ interface CartContextType {
   addToCart: (p: Product) => void;
   removeFromCart: (id: number) => void;
   clearCart: () => void;
+  showToast: boolean;
+  toastMessage: string;
+  setShowToast: (show: boolean) => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
+
+  //new update for toast component instead of raw "alert"
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
 
   const addToCart = (product: Product) => {
     setCart((prev) => {
@@ -31,6 +38,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
       // Otherwise, add as new item
       return [...prev, { ...product, quantity: 1 }];
     });
+    //new update for toast component
+    setToastMessage(`${product.name} added to cart`);
+    setShowToast(true);
+
+    setTimeout(() => {
+      setShowToast(false);
+    }, 3000);
   };
 
   const removeFromCart = (id: number) => {
@@ -41,7 +55,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   return (
     <CartContext.Provider
-      value={{ cart, addToCart, removeFromCart, clearCart }}
+      value={{
+        cart,
+        addToCart,
+        removeFromCart,
+        clearCart,
+        showToast,
+        toastMessage,
+        setShowToast,
+      }}
     >
       {children}
     </CartContext.Provider>
