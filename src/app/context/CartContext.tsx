@@ -1,7 +1,15 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
-import type { Product } from "../types"; // If you don't have types.ts yet, comment this out
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
+
+import type { Product } from "../types";
+import { useSession } from "next-auth/react";
 
 interface CartItem extends Product {
   quantity: number;
@@ -26,8 +34,40 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
 
+  // step 4c- cart persistent get login status
+  const { data: session, status } = useSession();
+
+  //step 4c
+  // Load cart from database when user logs in
+  useEffect(() => {
+    if (status === "authenticated" && session?.user?.id) {
+      fetchCartFromDatabase();
+    } else if (status === "unauthenticated") {
+      // User logged out → clear cart
+      setCart([]);
+    }
+  }, [session?.user?.id, status]);
+
+  //step 4c - grab cart data from database
+  // Fetch cart from database
+  async function fetchCartFromDatabase() {
+    try {
+      const res = await fetch("/api/cart");
+      if (!res.ok) {
+        throw new Error("Failed to fetch cart");
+      }
+      const data = await res.json();
+      setCart(data.cart || []);
+    } catch (e) {
+      console.error("Error loading cart:", e);
+      // Keep local cart on error and not revert for better user experience
+      // UI and database will sync once refresh even error occur
+    }
+  }
+
   const addToCart = (product: Product) => {
     setCart((prev) => {
+      //original step1: update UI even API failed
       const existing = prev.find((p) => p.id === product.id);
       if (existing) {
         // If already exists, increment quantity by 1
@@ -38,7 +78,23 @@ export function CartProvider({ children }: { children: ReactNode }) {
       // Otherwise, add as new item
       return [...prev, { ...product, quantity: 1 }];
     });
-    //new update for toast component
+
+    // new updated in step4c- Step 2: If logged in, sync to database
+    if (session?.user?.id) {
+      fetch("/api/cart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productId: product.id,
+          quantity: 1,
+        }),
+      }).catch((e) => {
+        console.error("Failed to sync cart to database:", e);
+        // Don't rollback - user will see correct data on refresh
+      });
+    }
+
+    //new update 4a - for toast component
     setToastMessage(`${product.name} added to cart`);
     setShowToast(true);
 
@@ -49,9 +105,29 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const removeFromCart = (id: number) => {
     setCart((prev) => prev.filter((p) => p.id !== id));
+
+    // updated in Step4c: If logged in, sync to database
+    if (session?.user?.id) {
+      fetch(`/api/cart/${id}`, {
+        method: "DELETE",
+      }).catch((e) => {
+        console.error("Failed to remove from cart:", e);
+      });
+    }
   };
 
-  const clearCart = () => setCart([]);
+  const clearCart = () => {
+    setCart([]);
+
+    // updated in Step4c: If logged in, sync to database
+    if (session?.user?.id) {
+      fetch("/api/cart", {
+        method: "DELETE",
+      }).catch((e) => {
+        console.error("Failed to clear cart:", e);
+      });
+    }
+  };
 
   return (
     <CartContext.Provider

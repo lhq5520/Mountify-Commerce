@@ -5346,3 +5346,1231 @@ User still has admin access until re-login
 ⚠️ **Role changes require re-login** (acceptable trade-off)
 
 ---
+
+# Version 4C - Shopping Cart Persistence Implementation & Next.js Critical update to 16.0.7:
+
+## Next.js update to 16.0.7
+
+Security Advisory: CVE-2025-66478
+
+## Why update to 16.0.7 in the middle?
+
+The vulnerable RSC protocol allowed untrusted inputs to influence server-side execution behavior. Under specific conditions, an attacker could craft requests that trigger unintended server execution paths. This can result in remote code execution in unpatched environments.
+
+## Overview of Cart Persistence Implementation
+
+Implemented database-backed shopping cart persistence for authenticated users, replacing the ephemeral in-memory cart with PostgreSQL storage. The implementation uses optimistic UI updates for immediate feedback while synchronizing cart state with the database in the background, ensuring cart data persists across sessions, devices, and page refreshes.
+
+---
+
+## Problem Statement
+
+### Before Implementation
+
+**Cart stored in React state only:**
+
+```typescript
+const [cart, setCart] = useState<CartItem[]>([]);
+// Stored in browser memory
+```
+
+**Limitations:**
+
+- ❌ Refresh page → Cart lost
+- ❌ Close browser → Cart lost
+- ❌ Switch devices → Cart empty
+- ❌ No synchronization across tabs
+- ❌ Poor user experience (frustrating for returning customers)
+
+**Why this existed:**
+
+- Initial MVP focused on core functionality
+- In-memory state simpler to implement
+- Deferred persistence to later phase
+
+---
+
+## Solution Architecture
+
+### Hybrid Approach: Database + Local State
+
+**For authenticated users:**
+
+```
+Browser (React State)  ←→  Database (PostgreSQL)
+       ↓                         ↓
+  Immediate UI               Persistent storage
+  Updates                    Sync in background
+```
+
+**For guest users:**
+
+```
+Browser (React State only)
+       ↓
+  Ephemeral (not persisted)
+  Converts to database on login
+```
+
+**Design philosophy:**
+
+- Optimistic UI updates (instant feedback)
+- Background database sync (reliability)
+- Best of both worlds (speed + persistence)
+
+---
+
+## Implementation Details
+
+### 1. Database Schema
+
+**Created cart_items table:**
+
+```sql
+CREATE TABLE cart_items (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  quantity INTEGER NOT NULL CHECK (quantity > 0 AND quantity <= 1000),
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(user_id, product_id)
+);
+
+CREATE INDEX idx_cart_items_user ON cart_items(user_id);
+```
+
+---
+
+#### Schema Design Decisions
+
+**Foreign key constraints with CASCADE:**
+
+```sql
+REFERENCES users(id) ON DELETE CASCADE
+REFERENCES products(id) ON DELETE CASCADE
+```
+
+**What CASCADE means:**
+
+```
+User deleted from users table
+       ↓
+PostgreSQL automatically executes:
+DELETE FROM cart_items WHERE user_id = <deleted_user_id>
+       ↓
+User's cart automatically cleared
+```
+
+**Why CASCADE for cart (not for orders):**
+
+- Cart is temporary/disposable data
+- User deleted → cart is meaningless
+- Product deleted → can't purchase anyway
+
+**Orders use RESTRICT instead:**
+
+```sql
+-- Orders should NOT cascade
+REFERENCES users(id) ON DELETE RESTRICT
+-- Prevents accidental deletion of users with order history
+```
+
+---
+
+**UNIQUE constraint on (user_id, product_id):**
+
+**Purpose:**
+
+- One user can only have one record per product
+- Prevents duplicates
+
+**Behavior:**
+
+```sql
+-- First add
+INSERT INTO cart_items (user_id, product_id, quantity) VALUES (1, 5, 2);
+✅ Success
+
+-- Second add (same product)
+INSERT INTO cart_items (user_id, product_id, quantity) VALUES (1, 5, 1);
+❌ Error: UNIQUE constraint violation
+
+-- Correct approach: UPSERT
+INSERT ... ON CONFLICT (user_id, product_id) DO UPDATE SET quantity = ...
+✅ Updates existing record
+```
+
+---
+
+**Quantity validation:**
+
+```sql
+CHECK (quantity > 0 AND quantity <= 1000)
+```
+
+**Database-level validation:**
+
+- Prevents zero/negative quantities
+- Prevents unrealistic bulk orders (abuse protection)
+- Complements API validation (defense in depth)
+
+---
+
+**Index strategy:**
+
+```sql
+CREATE INDEX idx_cart_items_user ON cart_items(user_id);
+```
+
+**Why separate user_id index when UNIQUE already creates composite index?**
+
+**Composite index (user_id, product_id):**
+
+- Optimizes: `WHERE user_id = 1 AND product_id = 5`
+- Less optimal: `WHERE user_id = 1` (alone)
+- Not optimal: `WHERE product_id = 5` (second column can't be used alone)
+
+**Separate user_id index:**
+
+- Optimizes: `WHERE user_id = 1` (most common query)
+- Used when fetching entire cart: `SELECT * FROM cart_items WHERE user_id = ?`
+
+**Performance comparison:**
+
+```
+Query: Get user's cart (10,000 total cart items)
+
+Without user_id index:
+  Uses composite index (suboptimal)
+  Scans: ~50-100 rows
+  Time: 10-20ms
+
+With user_id index:
+  Uses dedicated index
+  Scans: ~5 rows (user's items only)
+  Time: 2-5ms
+```
+
+---
+
+### 2. Backend API Endpoints
+
+#### A. GET /api/cart
+
+**File:** `src/app/api/cart/route.ts`
+
+**Purpose:** Fetch authenticated user's cart with product details
+
+**SQL query:**
+
+```sql
+SELECT
+  ci.id,
+  ci.product_id,
+  ci.quantity,
+  p.name,
+  p.price,
+  p.image_url,
+  p.description
+FROM cart_items ci
+JOIN products p ON ci.product_id = p.id
+WHERE ci.user_id = $1
+ORDER BY ci.created_at DESC
+```
+
+**Why JOIN products?**
+
+- Cart only stores references (user_id, product_id, quantity)
+- Frontend needs display data (name, price, image)
+- JOIN fetches everything in one query (efficient)
+
+**Response format:**
+
+```json
+{
+  "cart": [
+    {
+      "id": 5,
+      "name": "Product A",
+      "price": 29.99,
+      "quantity": 2,
+      "imageUrl": "..."
+    }
+  ]
+}
+```
+
+---
+
+#### B. POST /api/cart
+
+**Purpose:** Add product to cart (or increment quantity if exists)
+
+**UPSERT implementation:**
+
+```sql
+INSERT INTO cart_items (user_id, product_id, quantity, updated_at)
+VALUES ($1, $2, $3, NOW())
+ON CONFLICT (user_id, product_id)
+DO UPDATE SET
+  quantity = cart_items.quantity + EXCLUDED.quantity,
+  updated_at = NOW()
+```
+
+**UPSERT breakdown:**
+
+**Scenario 1: Product not in cart**
+
+```
+Cart: empty
+Add: product 5, quantity 1
+     ↓
+INSERT executes
+     ↓
+Result: (user_id=1, product_id=5, quantity=1)
+```
+
+**Scenario 2: Product already in cart**
+
+```
+Cart: product 5, quantity 2
+Add: product 5, quantity 1
+     ↓
+UNIQUE constraint triggers conflict
+     ↓
+ON CONFLICT DO UPDATE executes
+     ↓
+quantity = 2 (existing) + 1 (new) = 3
+     ↓
+Result: (user_id=1, product_id=5, quantity=3)
+```
+
+**Why UPSERT vs separate SELECT + INSERT/UPDATE:**
+
+- Single database operation (faster)
+- Atomic (no race conditions)
+- Cleaner code
+- PostgreSQL-specific feature (some databases don't have this)
+
+---
+
+#### C. DELETE /api/cart
+
+**Purpose:** Clear entire cart
+
+```sql
+DELETE FROM cart_items WHERE user_id = $1
+```
+
+**Simple but effective:**
+
+- Removes all items for current user
+- Used when: Order completed, user wants fresh start
+
+---
+
+#### D. DELETE /api/cart/:productId
+
+**File:** `src/app/api/cart/[productId]/route.ts`
+
+**Purpose:** Remove specific product from cart
+
+```sql
+DELETE FROM cart_items WHERE user_id = $1 AND product_id = $2
+```
+
+**Security:**
+
+- Checks both user_id AND product_id
+- User can only remove from their own cart
+- Prevents deleting other users' cart items
+
+---
+
+### 3. CartContext Integration
+
+**File:** `src/app/context/CartContext.tsx`
+
+#### A. Session Awareness
+
+**Added session hook:**
+
+```typescript
+const { data: session, status } = useSession();
+```
+
+**Three states handled:**
+
+```typescript
+status === "loading"        → Don't fetch yet (wait)
+status === "authenticated"  → Fetch from database
+status === "unauthenticated" → Use local state only
+```
+
+---
+
+#### B. Database Loading on Login
+
+**useEffect for cart initialization:**
+
+```typescript
+useEffect(() => {
+  if (status === "authenticated" && session?.user?.id) {
+    fetchCartFromDatabase();
+  } else if (status === "unauthenticated") {
+    setCart([]); // Clear on logout
+  }
+}, [session?.user?.id, status]);
+```
+
+**Trigger conditions:**
+
+- User logs in → Fetch cart
+- User logs out → Clear cart
+- Page refresh while logged in → Re-fetch cart
+
+**Why depend on both session.user.id and status:**
+
+- `status` prevents premature API calls during loading
+- `session.user.id` triggers re-fetch when user changes (logout/login)
+
+---
+
+#### C. Optimistic Updates
+
+**Pattern applied to all cart operations:**
+
+```typescript
+const addToCart = (product: Product) => {
+  // ① Optimistic update (instant UI feedback)
+  setCart(prev => [...prev, product]);
+
+  // ② Background sync (if logged in)
+  if (session?.user?.id) {
+    fetch('/api/cart', { method: 'POST', body: {...} })
+      .catch(e => {
+        console.error('Sync failed:', e);
+        // Don't rollback - will correct on next page load
+      });
+  }
+
+  // ③ User feedback (toast)
+  setShowToast(true);
+};
+```
+
+**User experience timeline:**
+
+```
+t=0ms:   User clicks "Add to Cart"
+t=0ms:   Cart count updates (instant)
+t=0ms:   Toast appears
+t=100ms: API call completes (background)
+t=100ms: Database updated
+```
+
+**User perceives:** Instant response (doesn't wait for database)
+
+---
+
+#### D. Error Handling Strategy
+
+**Chosen approach: Graceful degradation**
+
+```typescript
+try {
+  await fetch('/api/cart', {...});
+} catch (e) {
+  console.error(e);
+  // Log error but don't rollback UI
+  // User sees optimistic state
+  // Next page refresh will load correct data from database
+}
+```
+
+**Alternative approaches not chosen:**
+
+**❌ Strict rollback:**
+
+```typescript
+catch (e) {
+  setCart(prev => /* revert changes */);
+  showErrorToast("Failed to add to cart");
+}
+```
+
+- Bad UX: Item appears then disappears
+- Confusing for users
+- Network failures are rare
+
+**❌ Wait for confirmation:**
+
+```typescript
+const result = await fetch('/api/cart', {...});
+if (result.ok) {
+  setCart(prev => [...]);  // Only update if API succeeds
+}
+```
+
+- Slow UX: User waits 100ms
+- Feels laggy
+- Defeats purpose of client-side state
+
+**✅ Chosen approach (optimistic with eventual consistency):**
+
+- Instant UI feedback
+- Most operations succeed (network is stable)
+- Failed syncs auto-correct on page refresh
+- Best perceived performance
+- Industry standard (Amazon, Shopify use this)
+
+---
+
+## Database Concepts Learned
+
+### 1. UNIQUE Constraint Auto-Creates Index
+
+**Common misconception:**
+
+```sql
+email TEXT UNIQUE NOT NULL  -- Creates constraint
+CREATE INDEX idx_email ON users(email);  -- ❌ Redundant!
+```
+
+**What actually happens:**
+
+```sql
+email TEXT UNIQUE NOT NULL
+-- PostgreSQL automatically creates:
+-- CREATE UNIQUE INDEX users_email_key ON users(email)
+```
+
+**Lesson learned:**
+
+- UNIQUE constraints include index for free
+- Don't manually create duplicate indexes
+- Check existing indexes before creating new ones
+- Discovered via database inspection (saw duplicate index)
+
+---
+
+### 2. Composite Index vs Single-Column Index
+
+**Composite UNIQUE index:**
+
+```sql
+UNIQUE(user_id, product_id)
+-- Creates index on (user_id, product_id) tuple
+```
+
+**Query optimization:**
+
+```sql
+-- ✅ Fully optimized
+WHERE user_id = 1 AND product_id = 5
+
+-- ⚠️ Partially optimized (can use first column)
+WHERE user_id = 1
+
+-- ❌ Cannot use index (second column alone)
+WHERE product_id = 5
+```
+
+**Analogy: Phone book sorted by (LastName, FirstName)**
+
+- Find "Zhang Wei" → Fast (use index)
+- Find all "Zhang" → Moderate (scan Zhangs)
+- Find all "Wei" → Slow (scan entire book)
+
+**Solution: Add single-column index for frequent queries**
+
+```sql
+CREATE INDEX idx_cart_items_user ON cart_items(user_id);
+-- Optimizes: WHERE user_id = ? (most common cart query)
+```
+
+---
+
+### 3. ON DELETE CASCADE vs Other Options
+
+**CASCADE options comparison:**
+
+| Option      | Behavior             | Use Case                       |
+| ----------- | -------------------- | ------------------------------ |
+| `CASCADE`   | Auto-delete children | Cart items (disposable)        |
+| `RESTRICT`  | Prevent deletion     | Orders (must be handled first) |
+| `SET NULL`  | Set FK to NULL       | Optional relationships         |
+| `NO ACTION` | Same as RESTRICT     | Default behavior               |
+
+**Example scenarios:**
+
+**CASCADE (cart_items):**
+
+```sql
+DELETE FROM users WHERE id = 1;
+-- Automatically executes:
+-- DELETE FROM cart_items WHERE user_id = 1;
+-- User's cart automatically cleaned up ✅
+```
+
+**RESTRICT (orders - should use this):**
+
+```sql
+-- If orders used RESTRICT:
+DELETE FROM users WHERE id = 1;
+-- ❌ Error: Cannot delete user with existing orders
+-- Must handle orders first (archive? refund? transfer?)
+```
+
+---
+
+### 4. UPSERT Pattern (INSERT ... ON CONFLICT)
+
+**PostgreSQL's UPSERT syntax:**
+
+```sql
+INSERT INTO table (col1, col2) VALUES (val1, val2)
+ON CONFLICT (unique_columns)
+DO UPDATE SET col2 = new_value;
+```
+
+**Comparison with traditional approach:**
+
+**❌ Old way (2 queries):**
+
+```typescript
+const exists = await query("SELECT * FROM cart_items WHERE ...");
+if (exists.rows.length > 0) {
+  await query("UPDATE cart_items SET quantity = ...");
+} else {
+  await query("INSERT INTO cart_items VALUES (...)");
+}
+// 2 round trips to database
+```
+
+**✅ UPSERT way (1 query):**
+
+```typescript
+await query(`
+  INSERT INTO cart_items (user_id, product_id, quantity) VALUES ($1, $2, $3)
+  ON CONFLICT (user_id, product_id) 
+  DO UPDATE SET quantity = cart_items.quantity + EXCLUDED.quantity
+`);
+// 1 round trip to database
+// Atomic operation (no race condition)
+```
+
+**Benefits:**
+
+- 50% reduction in database calls
+- Atomic (no race condition if two requests hit simultaneously)
+- Cleaner code (less branching logic)
+
+---
+
+## Frontend Implementation
+
+### CartContext Refactoring
+
+**File:** `src/app/context/CartContext.tsx`
+
+#### A. Session Integration
+
+**Added session awareness:**
+
+```typescript
+const { data: session, status } = useSession();
+```
+
+**Why both session and status?**
+
+```typescript
+status = "loading"    → Session check in progress, don't fetch yet
+status = "authenticated" → User logged in, fetch from database
+status = "unauthenticated" → Guest user, use local state only
+```
+
+**Prevents race condition:**
+
+```
+Page loads
+  ↓ 0ms
+status = "loading", session = undefined
+  ↓ (Bad: if we only check session)
+fetchCart() called with undefined userId ❌
+  ↓ 100ms
+status = "authenticated", session = { user: { id: "1" } }
+  ↓ (Good: check status first)
+Only fetch when status = "authenticated" ✅
+```
+
+---
+
+#### B. Cart Loading Strategy
+
+**useEffect for initialization:**
+
+```typescript
+useEffect(() => {
+  if (status === "authenticated" && session?.user?.id) {
+    fetchCartFromDatabase();
+  } else if (status === "unauthenticated") {
+    setCart([]); // Clear cart on logout
+  }
+}, [session?.user?.id, status]);
+```
+
+**Dependency array analysis:**
+
+- `session?.user?.id` - Triggers when user logs in/out
+- `status` - Triggers when auth state changes
+
+**Execution scenarios:**
+
+**Scenario 1: Page load (already logged in)**
+
+```
+Component mounts → useEffect runs
+  ↓
+status = "authenticated", session.user.id = "1"
+  ↓
+fetchCartFromDatabase() executes
+  ↓
+API returns cart → setCart(data)
+```
+
+**Scenario 2: User logs in**
+
+```
+status changes: "unauthenticated" → "authenticated"
+  ↓
+useEffect dependency changed → re-runs
+  ↓
+fetchCartFromDatabase() executes
+```
+
+**Scenario 3: User logs out**
+
+```
+status changes: "authenticated" → "unauthenticated"
+  ↓
+useEffect re-runs
+  ↓
+setCart([]) → Clear local cart
+```
+
+---
+
+#### C. Optimistic Update Pattern
+
+**Implementation for addToCart:**
+
+```typescript
+const addToCart = (product: Product) => {
+  // Phase 1: Immediate UI update (0ms latency)
+  setCart((prev) => {
+    const existing = prev.find((p) => p.id === product.id);
+    if (existing) {
+      return prev.map((p) =>
+        p.id === product.id ? { ...p, quantity: p.quantity + 1 } : p
+      );
+    }
+    return [...prev, { ...product, quantity: 1 }];
+  });
+
+  // Phase 2: Background database sync (if logged in)
+  if (session?.user?.id) {
+    fetch("/api/cart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId: product.id, quantity: 1 }),
+    }).catch((e) => {
+      console.error("Failed to sync cart:", e);
+      // Don't rollback - eventual consistency model
+    });
+  }
+
+  // Phase 3: User feedback
+  setToastMessage(`${product.name} added to cart`);
+  setShowToast(true);
+  setTimeout(() => setShowToast(false), 3000);
+};
+```
+
+**Why optimistic?**
+
+- User sees instant feedback (cart count +1 immediately)
+- Feels responsive and fast
+- Modern web app expectation
+
+**Eventual consistency model:**
+
+```
+Optimistic state (browser)  →  Actual state (database)
+         ↓                              ↓
+    May differ briefly            Source of truth
+         ↓                              ↓
+    On page refresh  ←  Loads from database (corrects any discrepancies)
+```
+
+---
+
+**Applied to all operations:**
+
+**removeFromCart:**
+
+```typescript
+// 1. Remove from UI immediately
+setCart((prev) => prev.filter((p) => p.id !== id));
+
+// 2. Sync to database
+if (session?.user?.id) {
+  fetch(`/api/cart/${id}`, { method: "DELETE" }).catch(console.error);
+}
+```
+
+**clearCart:**
+
+```typescript
+// 1. Clear UI immediately
+setCart([]);
+
+// 2. Sync to database
+if (session?.user?.id) {
+  fetch("/api/cart", { method: "DELETE" }).catch(console.error);
+}
+```
+
+---
+
+## Cross-Device Synchronization
+
+### How It Works
+
+**Device A:**
+
+```
+User logs in on laptop
+  ↓
+Adds iPhone to cart
+  ↓
+Database: cart_items (user_id=1, product_id=5, qty=1)
+```
+
+**Device B:**
+
+```
+User logs in on phone (same account)
+  ↓
+CartContext.useEffect triggers
+  ↓
+Fetches from database
+  ↓
+Cart shows: iPhone (qty=1) ✅
+```
+
+**Cross-tab synchronization (same device):**
+
+```
+Tab 1: Add product
+  ↓
+Database updated
+  ↓
+Tab 2: Refresh page
+  ↓
+Fetches latest from database
+  ↓
+Sees updated cart ✅
+```
+
+**Limitation (acceptable):**
+
+- Real-time sync across tabs not implemented
+- Requires: WebSocket or polling
+- Refresh needed to see changes from other tabs
+- Acceptable for MVP (uncommon use case)
+
+---
+
+## Guest User Handling
+
+### Current Implementation
+
+**Guest cart behavior:**
+
+```typescript
+// addToCart for guests
+if (!session?.user?.id) {
+  setCart(prev => [...]);  // Local state only
+  // No API call
+  // Data lost on refresh
+}
+```
+
+**Why not persist guest carts?**
+
+- No user_id to associate with
+- Could use session IDs, but adds complexity
+- Industry standard: Guest carts are ephemeral
+
+**Future enhancement (not implemented):**
+
+```typescript
+// Option 1: localStorage for guests
+if (!session) {
+  localStorage.setItem("guestCart", JSON.stringify(cart));
+}
+
+// Option 2: Merge on login
+// When guest logs in:
+// - Fetch database cart
+// - Merge with local cart
+// - Save merged result
+```
+
+---
+
+## Testing & Verification
+
+### Test Suite
+
+**Test 1: Cart persistence across refresh**
+
+- ✅ Add products while logged in
+- ✅ Refresh page
+- ✅ Cart items still present
+- ✅ Quantities correct
+
+**Test 2: Cross-device synchronization**
+
+- ✅ Add product on Device A
+- ✅ Login on Device B (same account)
+- ✅ Cart shows same items
+- ✅ Modify cart on Device B
+- ✅ Refresh Device A → sees changes
+
+**Test 3: Login/logout cart behavior**
+
+- ✅ Guest adds items (local state)
+- ✅ Login → cart clears (replaced with database cart)
+- ✅ Logout → cart clears (local state reset)
+- ✅ Re-login → database cart loads
+
+**Test 4: Optimistic updates**
+
+- ✅ Add item → instant cart count update
+- ✅ Remove item → instant removal
+- ✅ Clear cart → instant clear
+- ✅ All operations feel instant (no loading delay)
+
+**Test 5: Database verification**
+
+```sql
+-- Check cart_items table
+SELECT * FROM cart_items WHERE user_id = 1;
+
+-- Verify:
+✅ Records exist after adding products
+✅ Quantities update on duplicate adds
+✅ Records deleted after removal
+✅ All records cleared after clear cart
+```
+
+**Test 6: UPSERT behavior**
+
+- ✅ Add product first time → INSERT
+- ✅ Add same product → quantity increments (UPDATE)
+- ✅ No duplicate records created
+- ✅ UNIQUE constraint working
+
+---
+
+## Performance Characteristics
+
+### Database Operations
+
+**Metrics:**
+
+- GET cart: ~10ms (JOIN query with index)
+- POST cart: ~5ms (UPSERT)
+- DELETE item: ~3ms (indexed DELETE)
+- DELETE all: ~5ms (batch DELETE)
+
+**Index impact:**
+
+```
+Without idx_cart_items_user:
+  Query: WHERE user_id = 1
+  Scans: ~50% of table (average)
+  Time: 15-30ms
+
+With idx_cart_items_user:
+  Query: WHERE user_id = 1
+  Scans: Only user's items
+  Time: 2-5ms
+
+Improvement: 3-6x faster
+```
+
+---
+
+### Frontend Performance
+
+**Optimistic updates:**
+
+- User-perceived latency: 0ms (instant)
+- Actual database latency: Hidden (background)
+- Total improvement: Feels 10x faster than waiting for API
+
+**Comparison:**
+
+**Pessimistic (wait for API):**
+
+```
+Click "Add to Cart"
+  ↓ User waits...
+  ↓ 100ms
+Cart updates
+User perception: Slow
+```
+
+**Optimistic (instant UI):**
+
+```
+Click "Add to Cart"
+  ↓ 0ms
+Cart updates (user happy)
+  ↓ 100ms (background)
+Database syncs
+User perception: Fast
+```
+
+---
+
+## Architectural Decisions
+
+### Why PostgreSQL for Cart (Not Redis)
+
+**Considered Redis for cart but chose PostgreSQL:**
+
+**PostgreSQL advantages for this project:**
+
+- ✅ Already have it (no new infrastructure)
+- ✅ ACID guarantees (data reliability)
+- ✅ Foreign key constraints (data integrity)
+- ✅ Sufficient performance (< 20ms queries)
+- ✅ Simpler architecture (one database)
+
+**When Redis would be better:**
+
+- High concurrency (>10,000 requests/sec)
+- Extremely high cart operation frequency
+- Need sub-millisecond latency
+- Temporary data with auto-expiration needs
+
+**Decision rationale:**
+
+- Project scale doesn't justify Redis complexity
+- PostgreSQL performance adequate for expected load
+- Can migrate to Redis later if needed (clear upgrade path)
+
+---
+
+### Why Optimistic Updates
+
+**Alternative: Pessimistic updates (wait for server)**
+
+**Rejected because:**
+
+- User waits 100ms for every cart operation
+- Feels sluggish
+- Network latency visible to user
+
+**Optimistic chosen:**
+
+- Matches user expectation (modern web apps)
+- Rare failure cases handled gracefully
+- 99% of operations succeed anyway
+
+---
+
+## Known Limitations & Future Work
+
+### Current Limitations
+
+**Guest cart not persisted:**
+
+- Refresh → cart lost
+- Close browser → cart lost
+- Future: Can add localStorage fallback
+
+**No real-time sync across tabs:**
+
+- Add item in Tab A → Tab B doesn't update until refresh
+- Future: WebSocket or polling for live sync
+- Acceptable for MVP (uncommon scenario)
+
+**Failed sync detection:**
+
+- No user notification if database sync fails
+- Silently logs error
+- Future: Show subtle warning toast
+
+---
+
+### Potential Enhancements
+
+**Short-term (<1 hour each):**
+
+1. **localStorage for guest carts**
+
+   - Persist guest cart locally
+   - Merge with database on login
+
+2. **Cart merge logic**
+
+   - When guest logs in with items in cart
+   - Merge guest cart + database cart
+   - Handle quantity conflicts
+
+3. **Retry on sync failure**
+   - If API fails, retry 2-3 times
+   - Only give up after retries exhausted
+
+---
+
+**Medium-term (1-3 hours each):** 4. **Real-time sync across tabs**
+
+- Use BroadcastChannel API
+- Or Server-Sent Events
+- Updates propagate instantly
+
+5. **Cart analytics**
+
+   - Track abandoned carts
+   - Send reminder emails
+   - A/B test checkout flow
+
+6. **Cart expiration**
+   - Auto-remove items after 30 days
+   - Scheduled cleanup job
+
+---
+
+## Files Created/Modified
+
+### New Files
+
+```
+src/app/api/cart/route.ts                  (GET, POST, DELETE endpoints)
+src/app/api/cart/[productId]/route.ts      (DELETE single item)
+```
+
+### Modified Files
+
+```
+src/app/context/CartContext.tsx            (Database sync logic)
+```
+
+### Database Changes
+
+```sql
+CREATE TABLE cart_items (...)
+CREATE INDEX idx_cart_items_user ON cart_items(user_id)
+```
+
+---
+
+## Security Considerations
+
+### API Authentication
+
+**All cart endpoints check authentication:**
+
+```typescript
+const session = await auth();
+
+if (!session?.user?.id) {
+  return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+}
+```
+
+**Why necessary:**
+
+- Prevents unauthorized cart access
+- Ensures user can only modify their own cart
+- Returns 401 (Unauthorized) not 403 (Forbidden)
+
+---
+
+### SQL Injection Prevention
+
+**All queries use parameterized statements:**
+
+```typescript
+// ✅ Safe
+query("DELETE FROM cart_items WHERE user_id = $1 AND product_id = $2", [
+  userId,
+  productId,
+]);
+
+// ❌ Vulnerable (hypothetical)
+query(`DELETE FROM cart_items WHERE user_id = ${userId}`);
+```
+
+---
+
+### Input Validation
+
+**Product existence check before adding:**
+
+```typescript
+const productCheck = await query("SELECT id FROM products WHERE id = $1", [
+  productId,
+]);
+
+if (productCheck.rows.length === 0) {
+  return NextResponse.json({ error: "Product not found" }, { status: 404 });
+}
+```
+
+**Prevents:**
+
+- Adding non-existent products to cart
+- Malicious requests with fake product IDs
+- Database integrity violations
+
+---
+
+## Status
+
+✅ **Complete for authenticated users**  
+✅ **Optimistic UI updates for instant feedback**  
+✅ **Cross-device synchronization working**  
+✅ **Database persistence with foreign key integrity**  
+⚠️ **Guest carts still ephemeral** (future enhancement)
+
+---
+
+## Next Steps
+
+**Completed:**
+
+- ✅ Cart persistence for logged-in users
+- ✅ Database schema with constraints
+- ✅ CRUD API endpoints
+- ✅ Optimistic update UX
+
+**Planned (Next Session):**
+
+- Phase 2: Redis product caching
+- Phase 3: Redis rate limiting
+- Optional: localStorage guest cart persistence
+
+---
+
+## Key technical stack note:
+
+- **Update Strategy:** Optimistic updates with eventual consistency
+- **Performance:** Indexed queries, UPSERT operations
