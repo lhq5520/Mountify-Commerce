@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { query } from "@/lib/db"; // use for order insertion when checkout
 import { auth } from "@/auth";  // ← use for user validation
+import { redis } from "@/lib/redis";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2025-11-17.clover",
@@ -24,6 +25,37 @@ export async function POST(req: Request) {
   try {
     const usersession = await auth();
     // 1. parse the JSON
+
+    // step4d- Rate Limiting using redis 
+    // Identify user: use user_id if logged in, otherwise use IP
+    const identifier = usersession?.user?.id 
+      ? `user:${usersession.user.id}`
+      : `ip:${req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown'}`;
+    
+    const rateLimitKey = `ratelimit:checkout:${identifier}`;
+    
+    // Increment counter
+    const requestCount = await redis.incr(rateLimitKey);
+    
+    // Set expiration on first request (60 seconds window)
+    if (requestCount === 1) {
+      await redis.expire(rateLimitKey, 60);
+    }
+    
+    // Check if exceeded limit
+    if (requestCount > 10) {
+      return NextResponse.json(
+        { 
+          error: "Too many checkout attempts. Please try again in a minute.",
+          retryAfter: 60 
+        },
+        { status: 429 }
+      );
+    }
+    
+    console.log(`Rate limit: ${identifier} - ${requestCount}/10`);
+    // End Rate Limiting 
+
     const body = await req.json() as CheckoutBody
     
     // 2. verify：if cart is empty?
