@@ -9,6 +9,7 @@ import {
   LogOut,
   Settings as SettingsIcon,
   Package,
+  Shield,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useCart } from "@/app/context/CartContext";
@@ -27,6 +28,9 @@ export default function Navbar() {
 
   const displayName =
     session?.user?.name || session?.user?.email?.split("@")[0] || "Account";
+
+  //see if the user is admin
+  const isAdmin = session?.user?.role === "admin";
 
   // Close account dropdown when clicking outside
   useEffect(() => {
@@ -119,6 +123,17 @@ export default function Navbar() {
                           <SettingsIcon size={16} />
                           <span>Settings</span>
                         </Link>
+
+                        {isAdmin && (
+                          <Link
+                            href="/admin/products"
+                            className="flex items-center gap-2 px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] hover:text-[var(--color-text-primary)] transition-colors duration-150"
+                            onClick={() => setAccountOpen(false)}
+                          >
+                            <Shield size={16} />
+                            <span>Admin</span>
+                          </Link>
+                        )}
 
                         <button
                           onClick={() => {
@@ -228,6 +243,17 @@ export default function Navbar() {
                     <SettingsIcon size={18} />
                     <span>Settings</span>
                   </Link>
+
+                  {isAdmin && (
+                    <Link
+                      href="/admin"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] py-1.5 transition-colors duration-200"
+                    >
+                      <Shield size={18} />
+                      <span>Admin</span>
+                    </Link>
+                  )}
 
                   <button
                     onClick={() => {
