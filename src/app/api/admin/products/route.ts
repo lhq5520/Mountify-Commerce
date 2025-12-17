@@ -19,9 +19,12 @@ export async function GET() {
     }
 
     const result = await query(
-      `SELECT id, name, price, description, detailed_description, image_url, image_url_hover, created_at 
-       FROM products 
-       ORDER BY created_at DESC`
+      `SELECT p.id, p.name, p.price, p.description, p.detailed_description, 
+        p.image_url, p.image_url_hover, p.category_id, p.created_at,
+        c.name as category_name, c.slug as category_slug
+      FROM products p
+      LEFT JOIN categories c ON p.category_id = c.id
+      ORDER BY p.created_at DESC`
     );
 
     const products = result.rows.map(row => ({
@@ -33,6 +36,9 @@ export async function GET() {
       imageUrl: row.image_url,
       imageUrlHover: row.image_url_hover,
       createdAt: row.created_at,
+      categoryId: row.category_id,
+      categoryName: row.category_name,
+      categorySlug: row.category_slug,
     }));
 
     return NextResponse.json({ products });
@@ -60,7 +66,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { name, price, description, detailedDescription, imageUrl, imageUrlHover } = body;
+    const { name, price, description, detailedDescription, imageUrl, imageUrlHover, categoryId } = body;
 
     // Validation
     if (!name || name.trim().length === 0) {
@@ -109,8 +115,8 @@ export async function POST(req: Request) {
 
     // Insert product
     const result = await query(
-      `INSERT INTO products (name, price, description, detailed_description, image_url, image_url_hover) 
-       VALUES ($1, $2, $3, $4, $5, $6) 
+      `INSERT INTO products (name, price, description, detailed_description, image_url, image_url_hover, category_id) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
        RETURNING id, name, price, created_at`,
       [
         name.trim(),
@@ -118,7 +124,8 @@ export async function POST(req: Request) {
         description.trim(),
         detailedDescription?.trim() || description.trim(),
         imageUrl.trim(),
-        imageUrlHover?.trim() || null
+        imageUrlHover?.trim() || null,
+        categoryId || null
       ]
     );
 

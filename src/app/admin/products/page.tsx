@@ -13,6 +13,8 @@ interface Product {
   imageUrl: string;
   imageUrlHover?: string;
   createdAt: string;
+  categoryId: number | null;
+  categoryName: string | null;
 }
 
 export default function AdminProductsPage() {
@@ -161,6 +163,9 @@ export default function AdminProductsPage() {
                       Description
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                      Category
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
                       Created
                     </th>
                     <th className="px-6 py-3 text-right text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
@@ -196,6 +201,13 @@ export default function AdminProductsPage() {
                       </td>
                       <td className="px-6 py-4 text-sm text-[var(--color-text-secondary)] max-w-xs truncate">
                         {product.description}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-[var(--color-text-secondary)]">
+                        {product.categoryName || (
+                          <span className="text-[var(--color-text-tertiary)]">
+                            —
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-sm text-[var(--color-text-secondary)]">
                         {new Date(product.createdAt).toLocaleDateString(

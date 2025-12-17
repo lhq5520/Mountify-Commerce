@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -31,6 +31,18 @@ export default function NewProductPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [categoryId, setCategoryId] = useState<string>("");
+  const [categories, setCategories] = useState<{ id: number; name: string }[]>(
+    []
+  );
+
+  useEffect(() => {
+    fetch("/api/categories")
+      .then((res) => res.json())
+      .then((data) => setCategories(data.categories || []))
+      .catch((e) => console.error("Failed to load categories:", e));
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -48,6 +60,7 @@ export default function NewProductPage() {
           detailedDescription: detailedDescription || description,
           imageUrl,
           imageUrlHover: imageUrlHover || null,
+          categoryId: categoryId ? parseInt(categoryId, 10) : null,
         }),
       });
 
@@ -166,6 +179,28 @@ export default function NewProductPage() {
                   placeholder="29.99"
                 />
               </div>
+            </div>
+
+            {/* Category */}
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
+                Category
+              </label>
+              <select
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-[var(--color-border)] focus:border-[var(--color-primary)] focus:outline-none transition-colors bg-white"
+              >
+                <option value="">No category</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                Assign product to a category for filtering
+              </p>
             </div>
 
             {/* Short Description */}

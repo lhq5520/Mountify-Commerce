@@ -26,11 +26,22 @@ export default function EditProductPage() {
   const [imageUrl, setImageUrl] = useState("");
   const [imageUrlHover, setImageUrlHover] = useState("");
   const [images, setImages] = useState<ProductImage[]>([]);
+  const [categoryId, setCategoryId] = useState<string>("");
+  const [categories, setCategories] = useState<{ id: number; name: string }[]>(
+    []
+  );
 
   // UI state
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/categories")
+      .then((res) => res.json())
+      .then((data) => setCategories(data.categories || []))
+      .catch((e) => console.error("Failed to load categories:", e));
+  }, []);
 
   // Load existing product data
   useEffect(() => {
@@ -54,6 +65,11 @@ export default function EditProductPage() {
         setDetailedDescription(product.detailedDescription || "");
         setImageUrl(product.imageUrl || "");
         setImageUrlHover(product.imageUrlHover || "");
+        setCategoryId(
+          product.categoryId?.toString() ||
+            product.category_id?.toString() ||
+            ""
+        );
 
         // Populate images (convert from API format)
         if (data.images && data.images.length > 0) {
@@ -95,6 +111,7 @@ export default function EditProductPage() {
           detailedDescription: detailedDescription || description,
           imageUrl,
           imageUrlHover: imageUrlHover || null,
+          categoryId: categoryId ? parseInt(categoryId, 10) : null,
         }),
       });
 
@@ -229,6 +246,28 @@ export default function EditProductPage() {
                   placeholder="29.99"
                 />
               </div>
+            </div>
+
+            {/* Category */}
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
+                Category
+              </label>
+              <select
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-[var(--color-border)] focus:border-[var(--color-primary)] focus:outline-none transition-colors bg-white"
+              >
+                <option value="">No category</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                Assign product to a category for filtering
+              </p>
             </div>
 
             {/* Short Description */}

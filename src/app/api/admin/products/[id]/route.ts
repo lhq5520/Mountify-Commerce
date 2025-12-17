@@ -30,7 +30,7 @@ export async function PUT(
     }
 
     const body = await req.json();
-    const { name, price, description, detailedDescription, imageUrl, imageUrlHover } = body;
+    const { name, price, description, detailedDescription, imageUrl, imageUrlHover, categoryId } = body;
 
     // Validation (same as POST)
     if (!name || name.trim().length === 0) {
@@ -94,8 +94,8 @@ export async function PUT(
     const result = await query(
       `UPDATE products 
        SET name = $1, price = $2, description = $3, detailed_description = $4, 
-           image_url = $5, image_url_hover = $6
-       WHERE id = $7
+           image_url = $5, image_url_hover = $6, category_id = $7
+       WHERE id = $8
        RETURNING id, name, price`,
       [
         name.trim(),
@@ -104,6 +104,7 @@ export async function PUT(
         detailedDescription?.trim() || description.trim(),
         imageUrl.trim(),
         imageUrlHover?.trim() || null,
+        categoryId || null,
         productId
       ]
     );

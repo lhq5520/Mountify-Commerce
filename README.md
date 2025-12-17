@@ -10665,3 +10665,444 @@ src/
 ---
 
 _Step 5e completed: 12/16 2025_
+
+# Step 5f - Product Categories, Filtering, Sorting & Pagination
+
+## Overview
+
+This step implements a flexible product categorization system with full admin management, and enhances the Products page with category filtering, sorting options, and pagination.
+
+---
+
+## 1. Database Schema
+
+### Categories Table
+
+```sql
+CREATE TABLE categories (
+  id SERIAL PRIMARY KEY,
+  name CITEXT NOT NULL,
+  slug CITEXT NOT NULL,
+  description TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_categories_name UNIQUE (name),
+  CONSTRAINT uq_categories_slug UNIQUE (slug)
+);
+```
+
+### Products Table Update
+
+```sql
+ALTER TABLE products
+  ADD COLUMN category_id INTEGER
+  REFERENCES categories(id)
+  ON DELETE SET NULL;
+
+CREATE INDEX idx_products_category ON products(category_id);
+```
+
+**Design Decisions:**
+
+| Decision               | Reason                                              |
+| ---------------------- | --------------------------------------------------- |
+| `CITEXT` for name/slug | Case-insensitive uniqueness                         |
+| `TIMESTAMPTZ`          | Timezone-aware timestamps                           |
+| `ON DELETE SET NULL`   | Products become uncategorized when category deleted |
+| Named constraints      | Clear error messages                                |
+
+---
+
+## 2. Categories API
+
+### Public API (with Redis caching)
+
+**File:** `src/app/api/categories/route.ts`
+
+```typescript
+GET / api / categories;
+```
+
+**Features:**
+
+- Redis cache with 1-hour TTL
+- Returns all categories ordered by `display_order`
+
+**Response:**
+
+```json
+{
+  "categories": [
+    {
+      "id": 1,
+      "name": "Gear",
+      "slug": "gear",
+      "description": "...",
+      "display_order": 1
+    }
+  ]
+}
+```
+
+### Admin API
+
+**File:** `src/app/api/admin/categories/route.ts`
+
+```typescript
+GET  /api/admin/categories      # List with product counts
+POST /api/admin/categories      # Create new category
+```
+
+**File:** `src/app/api/admin/categories/[id]/route.ts`
+
+```typescript
+PUT    /api/admin/categories/:id   # Update category
+DELETE /api/admin/categories/:id   # Delete category
+```
+
+**Features:**
+
+- Admin authentication required
+- Slug format validation (lowercase, numbers, hyphens only)
+- Unique constraint error handling
+- Cache invalidation on create/update/delete
+
+**Cache Invalidation:**
+
+```typescript
+await redis.del("categories:all");
+```
+
+---
+
+## 3. Products API Enhancement
+
+**File:** `src/app/api/products/route.ts`
+
+### Smart Caching Strategy
+
+```typescript
+const hasFilters =
+  (category && category !== "all") ||
+  (sort && sort !== "newest") ||
+  page > 1 ||
+  (search && search.length >= 2);
+
+if (hasFilters) {
+  return await getFilteredProducts(searchParams); // Database query
+} else {
+  return await getAllProductsCached(); // Redis cache
+}
+```
+
+**Logic:** Default state uses cache; any filter triggers database query.
+
+### Query Parameters
+
+| Parameter  | Values                                      | Default |
+| ---------- | ------------------------------------------- | ------- |
+| `category` | slug or "all"                               | all     |
+| `sort`     | newest, price_asc, price_desc, name, oldest | newest  |
+| `page`     | 1-N                                         | 1       |
+| `limit`    | 1-50                                        | 12      |
+| `search`   | string (min 2 chars)                        | -       |
+
+### Response Format
+
+```json
+{
+  "products": [...],
+  "pagination": {
+    "page": 1,
+    "limit": 12,
+    "total": 48,
+    "totalPages": 4,
+    "hasMore": true
+  },
+  "source": "database-filtered"
+}
+```
+
+### SQL Query Building
+
+```typescript
+// Dynamic WHERE clause
+const conditions: string[] = [];
+const params: any[] = [];
+
+if (category && category !== "all") {
+  conditions.push(`c.slug = $${paramIndex}`);
+  params.push(category);
+}
+
+if (search) {
+  conditions.push(
+    `(p.name ILIKE $${paramIndex} OR p.description ILIKE $${paramIndex})`
+  );
+  params.push(`%${search}%`);
+}
+
+const whereClause =
+  conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+// Dynamic ORDER BY
+let orderClause = "ORDER BY p.created_at DESC";
+switch (sort) {
+  case "price_asc":
+    orderClause = "ORDER BY p.price ASC";
+    break;
+  case "price_desc":
+    orderClause = "ORDER BY p.price DESC";
+    break;
+  case "name":
+    orderClause = "ORDER BY p.name ASC";
+    break;
+}
+```
+
+---
+
+## 4. Admin Categories Page
+
+**File:** `src/app/admin/categories/page.tsx`
+
+### Features
+
+| Feature             | Description                                                  |
+| ------------------- | ------------------------------------------------------------ |
+| List view           | Table with Order, Name, Slug, Product Count                  |
+| Create modal        | Name (auto-generates slug), Slug, Description, Display Order |
+| Edit modal          | Same fields, pre-populated                                   |
+| Delete confirmation | Warning about products becoming uncategorized                |
+| Toast notifications | Success/error feedback                                       |
+
+### Sidebar Navigation
+
+Added to `src/app/admin/layout.tsx`:
+
+```typescript
+import { FolderTree } from "lucide-react";
+
+const navItems = [
+  // ...existing items
+  { label: "Categories", href: "/admin/categories", icon: FolderTree },
+];
+```
+
+---
+
+## 5. Admin Products Updates
+
+### Product List Page
+
+Added Category column to display assigned category name.
+
+### New/Edit Product Pages
+
+**Files:**
+
+- `src/app/admin/products/new/page.tsx`
+- `src/app/admin/products/[id]/edit/page.tsx`
+
+**Added:**
+
+```typescript
+// State
+const [categoryId, setCategoryId] = useState<string>("");
+const [categories, setCategories] = useState<{ id: number; name: string }[]>(
+  []
+);
+
+// Fetch categories on mount
+useEffect(() => {
+  fetch("/api/categories")
+    .then((res) => res.json())
+    .then((data) => setCategories(data.categories || []));
+}, []);
+
+// Category select field
+<select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+  <option value="">No category</option>
+  {categories.map((cat) => (
+    <option key={cat.id} value={cat.id}>
+      {cat.name}
+    </option>
+  ))}
+</select>;
+```
+
+### Products API Updates
+
+**Files:**
+
+- `src/app/api/admin/products/route.ts` (GET, POST)
+- `src/app/api/admin/products/[id]/route.ts` (PUT)
+
+**Changes:**
+
+- GET: JOIN with categories, return categoryId/categoryName/categorySlug
+- POST: Accept categoryId, validate category exists, insert into category_id
+- PUT: Accept categoryId, validate category exists, update category_id
+
+---
+
+## 6. Products Page (Frontend)
+
+**File:** `src/app/products/page.tsx`
+
+### URL-Based State
+
+All filter state stored in URL for shareability:
+
+```
+/products?category=gear&sort=price_asc&page=2
+```
+
+### Filter Components
+
+**Category Dropdown:**
+
+- "All Products" option + dynamic categories from API
+- Shows current selection
+- Click outside to close
+
+**Sort Dropdown:**
+
+- Newest
+- Price: Low to High
+- Price: High to Low
+- Name: A-Z
+
+**Pagination:**
+
+- Previous / Next buttons
+- "Page X of Y" display
+- Disabled states at boundaries
+
+### Filter Update Logic
+
+```typescript
+function updateFilters(updates: Record<string, string | null>) {
+  const params = new URLSearchParams(searchParams.toString());
+
+  Object.entries(updates).forEach(([key, value]) => {
+    // Remove default values from URL
+    if (
+      value === null ||
+      value === "all" ||
+      (key === "sort" && value === "newest") ||
+      (key === "page" && value === "1")
+    ) {
+      params.delete(key);
+    } else {
+      params.set(key, value);
+    }
+  });
+
+  // Reset page when changing filters
+  if (!("page" in updates)) {
+    params.delete("page");
+  }
+
+  router.push(`/products?${params.toString()}`);
+}
+```
+
+---
+
+## File Structure
+
+```
+src/
+├── app/
+│   ├── admin/
+│   │   ├── categories/
+│   │   │   └── page.tsx                    # NEW: Category management
+│   │   ├── products/
+│   │   │   ├── page.tsx                    # UPDATED: Show category column
+│   │   │   ├── new/page.tsx                # UPDATED: Category select
+│   │   │   └── [id]/edit/page.tsx          # UPDATED: Category select
+│   │   └── layout.tsx                      # UPDATED: Added Categories nav
+│   ├── products/
+│   │   └── page.tsx                        # UPDATED: Filters + pagination
+│   └── api/
+│       ├── categories/
+│       │   └── route.ts                    # NEW: Public categories API
+│       ├── admin/
+│       │   ├── categories/
+│       │   │   ├── route.ts                # NEW: Admin categories CRUD
+│       │   │   └── [id]/route.ts           # NEW: Admin category update/delete
+│       │   └── products/
+│       │       ├── route.ts                # UPDATED: categoryId support
+│       │       └── [id]/route.ts           # UPDATED: categoryId support
+│       └── products/
+│           └── route.ts                    # UPDATED: Filtering + pagination
+```
+
+---
+
+## Caching Strategy
+
+| Data                    | Cache | TTL    | Invalidation            |
+| ----------------------- | ----- | ------ | ----------------------- |
+| Categories              | Redis | 1 hour | On create/update/delete |
+| Products (no filters)   | Redis | 10 min | On create/update/delete |
+| Products (with filters) | None  | -      | Always fresh            |
+
+---
+
+## User Experience
+
+### Products Page Flow
+
+```
+User visits /products
+       ↓
+Default: All categories, Newest, Page 1
+       ↓
+User selects "Gear" category
+       ↓
+URL updates to /products?category=gear
+       ↓
+Page resets to 1, products filtered
+       ↓
+User changes sort to "Price: Low to High"
+       ↓
+URL updates to /products?category=gear&sort=price_asc
+       ↓
+User navigates to page 2
+       ↓
+URL updates to /products?category=gear&sort=price_asc&page=2
+       ↓
+User shares URL - recipient sees exact same view
+```
+
+---
+
+## Testing Checklist
+
+**Categories Admin:**
+
+- [ ] Create category with auto-generated slug
+- [ ] Edit category name/slug/description/order
+- [ ] Delete category → products become uncategorized
+- [ ] Duplicate name/slug → error message
+
+**Products Admin:**
+
+- [ ] Create product with category
+- [ ] Edit product category
+- [ ] Products list shows category name
+
+**Products Page:**
+
+- [ ] Category filter works
+- [ ] Sort options work
+- [ ] Pagination works
+- [ ] URL reflects current state
+- [ ] Refresh maintains state
+- [ ] "Clear" resets all filters
+
+---
+
+_Step 5f completed: 12/16 2025_

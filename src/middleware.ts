@@ -49,5 +49,6 @@ export const config = {
     '/profile/:path*', // haven't implemented -> future function
     '/settings/:path*', // haven't implemented -> future function
     '/admin/:path*',
+    '/api/admin/:path*', // second protection
   ],
 };

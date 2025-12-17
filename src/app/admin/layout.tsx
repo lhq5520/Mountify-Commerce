@@ -9,6 +9,7 @@ import {
   Settings,
   ChevronRight,
   LayoutDashboard,
+  FolderTree,
 } from "lucide-react";
 
 const navItems = [
@@ -21,6 +22,11 @@ const navItems = [
     label: "Products",
     href: "/admin/products",
     icon: Package,
+  },
+  {
+    label: "Categories",
+    href: "/admin/categories",
+    icon: FolderTree,
   },
   {
     label: "Orders",
