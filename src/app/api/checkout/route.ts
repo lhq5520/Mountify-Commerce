@@ -134,6 +134,25 @@ export async function POST(req: Request) {
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/cart`,
       customer_email: body.email,
+      // get user address
+      shipping_address_collection: {
+        allowed_countries: ['US', 'CA', 'GB', 'AU', 'DE', 'FR', 'JP', 'CN'],
+      },
+
+      // get user phone number
+      phone_number_collection: {
+        enabled: true,
+      },
+
+      // customized text
+      custom_text: {
+        submit: {
+          message: 'We will process your order as soon as possible.',
+        },
+      },
+
+      // Session expire 30 minutes later
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
     });
 
     // create orders with sessionid - updated logic in step3A before that was api/orders directly to insert tables

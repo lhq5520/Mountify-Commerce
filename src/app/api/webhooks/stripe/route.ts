@@ -31,9 +31,23 @@ export async function POST(req: Request) {
     // 5. Update database
     switch (event.type) {
       case "checkout.session.completed":
-        const session = event.data.object as Stripe.Checkout.Session;
+        const session = event.data.object as Stripe.Checkout.Session& {
+          customer_details?: {
+            name?: string;
+            address?: {
+              line1?: string;
+              line2?: string;
+              city?: string;
+              state?: string;
+              postal_code?: string;
+              country?: string;
+            };
+            phone?: string;
+            email?: string;
+          };
+        };
         
-        // check is payment status is successful
+        // 1.check is payment status is successful
         if (session.payment_status === "paid") {
           // update order status
           await query(
@@ -41,7 +55,9 @@ export async function POST(req: Request) {
             ["paid", session.id]
           );
 
-          // get order detail and send email
+          console.log(`Order paid for session: ${session.id}`);
+
+          // 2. get order detail and send email
           try {
             const orderResult = await query(
               `SELECT o.id, o.email, o.total, o.created_at,
@@ -75,7 +91,101 @@ export async function POST(req: Request) {
             console.error("Failed to send confirmation email:", emailError);
           }
           
-          console.log(`Order paid for session: ${session.id}`);
+        //console.log("=== DEBUG ADDRESS ===");
+        //console.log("customer_details:", JSON.stringify(session.customer_details, null, 2));
+
+        // 3. Save user address (if user is logged in)
+        if (session.customer_details?.address) {
+          try {
+            // Get user_id from order
+            const userResult = await query(
+              "SELECT user_id FROM orders WHERE stripe_session_id = $1",
+              [session.id]
+            );
+
+            const userId = userResult.rows[0]?.user_id;
+
+            if (userId) {
+              const shipping = session.customer_details;
+              const addr = shipping.address!;
+              const phone = shipping.phone || null;
+
+              // Check if address already exists (avoid duplicates)
+              // NOTE: Use DB constraint + UPSERT to avoid race conditions
+              // Also compute is_default in SQL using NOT EXISTS to avoid extra COUNT query
+              const insertResult = await query(
+                `INSERT INTO addresses (
+                  user_id, name, line1, line2, city, state, postal_code, country, phone, is_default
+                )
+                VALUES (
+                  $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                  NOT EXISTS (SELECT 1 FROM addresses a WHERE a.user_id = $1)
+                )
+                ON CONFLICT (user_id, line1, postal_code) DO NOTHING
+                RETURNING id`,
+                [
+                  userId,
+                  shipping.name || "Default",
+                  addr.line1,
+                  addr.line2 || null,
+                  addr.city,
+                  addr.state || null,
+                  addr.postal_code,
+                  addr.country,
+                  phone,
+                ]
+              );
+
+              if (insertResult.rows.length > 0) {
+                console.log(`Address saved for user ${userId}`);
+              }
+            }
+          } catch (addrError: any) {
+            // If you have a partial unique index enforcing one default per user,
+            // a rare race can still happen when two inserts try to be default at the same time.
+            // In that case, retry inserting as non-default.
+            if (addrError?.code === "23505") {
+              try {
+                const userResult = await query(
+                  "SELECT user_id FROM orders WHERE stripe_session_id = $1",
+                  [session.id]
+                );
+
+                const userId = userResult.rows[0]?.user_id;
+
+                if (userId && session.customer_details?.address) {
+                  const shipping = session.customer_details;
+                  const addr = shipping.address!;
+                  const phone = shipping.phone || null;
+
+                  await query(
+                    `INSERT INTO addresses (
+                      user_id, name, line1, line2, city, state, postal_code, country, phone, is_default
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)
+                    ON CONFLICT (user_id, line1, postal_code) DO NOTHING`,
+                    [
+                      userId,
+                      shipping.name || "Default",
+                      addr.line1,
+                      addr.line2 || null,
+                      addr.city,
+                      addr.state || null,
+                      addr.postal_code,
+                      addr.country,
+                      phone,
+                    ]
+                  );
+                }
+              } catch (retryErr) {
+                console.error("Failed to save address (retry):", retryErr);
+              }
+              return;
+            }
+            console.error("Failed to save address:", addrError);
+          }
+        }
+
         }
         break;
       

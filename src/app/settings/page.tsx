@@ -1,9 +1,20 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { User, Lock, Calendar, Shield, Eye, EyeOff, Info } from "lucide-react";
+import {
+  User,
+  Lock,
+  Calendar,
+  Shield,
+  Eye,
+  EyeOff,
+  Info,
+  MapPin,
+  ChevronRight,
+} from "lucide-react";
 import { useToast } from "@/app/context/ToastContext";
 
 interface UserProfile {
@@ -225,6 +236,30 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+        </section>
+
+        {/* Addresses */}
+        <section className="rounded-2xl bg-white p-6 shadow-sm border border-[var(--color-border)] mb-6">
+          <Link
+            href="/settings/addresses"
+            className="flex items-center gap-4 p-4 rounded-xl bg-[var(--color-background)] hover:bg-gray-100 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center">
+              <MapPin size={20} className="text-teal-600" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-[var(--color-text-primary)]">
+                Manage Addresses
+              </p>
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                Add or edit your shipping addresses
+              </p>
+            </div>
+            <ChevronRight
+              size={20}
+              className="text-[var(--color-text-tertiary)]"
+            />
+          </Link>
         </section>
 
         {/* Change Password - only for credential user */}
