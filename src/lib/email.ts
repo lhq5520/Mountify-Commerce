@@ -1,5 +1,19 @@
 import { Resend } from "resend";
 
+interface OrderItem {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
+interface OrderEmailData {
+  orderId: number;
+  email: string;
+  total: number;
+  items: OrderItem[];
+  createdAt: string;
+}
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const EMAIL_FROM = process.env.EMAIL_FROM || "onboarding@resend.dev";
@@ -58,6 +72,116 @@ export async function sendPasswordResetEmail(
 
   } catch (e: any) {
     console.error("Email send exception:", e);
+    return { success: false, error: e };
+  }
+}
+
+export async function sendOrderConfirmationEmail(data: OrderEmailData) {
+  const { orderId, email, total, items, createdAt } = data;
+
+  // 生成商品列表 HTML
+  const itemsHtml = items
+    .map(
+      (item) => `
+      <tr>
+        <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5;">
+          <p style="margin: 0; font-size: 15px; color: #1d1d1f;">${item.name}</p>
+          <p style="margin: 4px 0 0; font-size: 13px; color: #86868b;">Qty: ${item.quantity}</p>
+        </td>
+        <td style="padding: 12px 0; border-bottom: 1px solid #e5e5e5; text-align: right;">
+          <p style="margin: 0; font-size: 15px; color: #1d1d1f;">$${(Number(item.price) * item.quantity).toFixed(2)}</p>
+        </td>
+      </tr>
+    `
+    )
+    .join("");
+
+  try {
+    const { data: result, error } = await resend.emails.send({
+      from: EMAIL_FROM,
+      to: email,
+      subject: `Order Confirmed #${orderId} - Mountify`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          </head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f7; padding: 40px 20px; margin: 0;">
+            <div style="max-width: 520px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+              
+              <!-- Header -->
+              <div style="background: #000; padding: 32px; text-align: center;">
+                <h1 style="margin: 0; font-size: 24px; font-weight: 600; color: #fff;">
+                  Order Confirmed ✓
+                </h1>
+              </div>
+              
+              <!-- Content -->
+              <div style="padding: 32px;">
+                <p style="margin: 0 0 8px; font-size: 13px; color: #86868b; text-transform: uppercase; letter-spacing: 0.5px;">
+                  Order #${orderId}
+                </p>
+                <p style="margin: 0 0 24px; font-size: 15px; color: #424245;">
+                  Thank you for your order! We're getting it ready.
+                </p>
+                
+                <!-- Order Items -->
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tbody>
+                    ${itemsHtml}
+                  </tbody>
+                </table>
+                
+                <!-- Total -->
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #1d1d1f;">
+                  <table style="width: 100%;">
+                    <tr>
+                      <td style="font-size: 15px; font-weight: 600; color: #1d1d1f;">Total</td>
+                      <td style="font-size: 18px; font-weight: 600; color: #1d1d1f; text-align: right;">
+                        $${total.toFixed(2)}
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+                
+                <!-- Order Date -->
+                <p style="margin: 24px 0 0; font-size: 13px; color: #86868b;">
+                  Order placed: ${new Date(createdAt).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+              </div>
+              
+              <!-- Footer -->
+              <div style="padding: 24px 32px; background: #f5f5f7; text-align: center;">
+                <p style="margin: 0; font-size: 13px; color: #86868b;">
+                  Questions? Please contact our customer services.
+                </p>
+                <p style="margin: 12px 0 0; font-size: 12px; color: #86868b;">
+                  Mountify · Thank you for shopping with us
+                </p>
+              </div>
+              
+            </div>
+          </body>
+        </html>
+      `,
+    });
+
+    if (error) {
+      console.error("Order confirmation email error:", error);
+      return { success: false, error };
+    }
+
+    return { success: true, data: result };
+  } catch (e: any) {
+    console.error("Order confirmation email exception:", e);
     return { success: false, error: e };
   }
 }

@@ -11106,3 +11106,245 @@ User shares URL - recipient sees exact same view
 ---
 
 _Step 5f completed: 12/16 2025_
+
+# Step 5g - Order Confirmation Email
+
+## Overview
+
+This step adds automatic order confirmation emails when a customer completes a purchase. The email is sent via Resend after Stripe webhook confirms payment success.
+
+---
+
+## Flow
+
+```
+Customer completes checkout
+       ↓
+Stripe processes payment
+       ↓
+Stripe sends webhook: checkout.session.completed
+       ↓
+Webhook handler:
+  1. Updates order status to "paid"
+  2. Queries order details (items, total, email)
+  3. Sends confirmation email via Resend
+       ↓
+Customer receives email
+```
+
+---
+
+## Implementation
+
+### 1. Email Function
+
+**File:** `src/lib/email.ts`
+
+**New interfaces:**
+
+```typescript
+interface OrderItem {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
+interface OrderEmailData {
+  orderId: number;
+  email: string;
+  total: number;
+  items: OrderItem[];
+  createdAt: string;
+}
+```
+
+**New function:** `sendOrderConfirmationEmail(data: OrderEmailData)`
+
+**Features:**
+
+- Generates HTML table of order items
+- Calculates line totals (price × quantity)
+- Formats order date in readable format
+- Apple-style email design (black header, clean typography)
+
+---
+
+### 2. Webhook Update
+
+**File:** `src/app/api/webhooks/stripe/route.ts`
+
+**Changes:**
+
+1. Added import:
+
+```typescript
+import { sendOrderConfirmationEmail } from "@/lib/email";
+```
+
+2. After updating order status, added email sending:
+
+```typescript
+// Query order details with items
+const orderResult = await query(
+  `SELECT o.id, o.email, o.total, o.created_at,
+          json_agg(json_build_object(
+            'name', p.name,
+            'quantity', oi.quantity,
+            'price', oi.price
+          )) as items
+   FROM orders o
+   JOIN order_items oi ON o.id = oi.order_id
+   JOIN products p ON oi.product_id = p.id
+   WHERE o.stripe_session_id = $1
+   GROUP BY o.id`,
+  [session.id]
+);
+
+// Send email
+if (orderResult.rows.length > 0) {
+  const order = orderResult.rows[0];
+  await sendOrderConfirmationEmail({
+    orderId: order.id,
+    email: order.email,
+    total: parseFloat(order.total),
+    items: order.items,
+    createdAt: order.created_at,
+  });
+}
+```
+
+---
+
+## SQL Query Explanation
+
+```sql
+SELECT
+  o.id,
+  o.email,
+  o.total,
+  o.created_at,
+  json_agg(json_build_object(
+    'name', p.name,
+    'quantity', oi.quantity,
+    'price', oi.price
+  )) as items
+FROM orders o
+JOIN order_items oi ON o.id = oi.order_id
+JOIN products p ON oi.product_id = p.id
+WHERE o.stripe_session_id = $1
+GROUP BY o.id
+```
+
+| Part                  | Purpose                                  |
+| --------------------- | ---------------------------------------- |
+| `json_agg()`          | Aggregates multiple rows into JSON array |
+| `json_build_object()` | Creates JSON object for each item        |
+| `GROUP BY o.id`       | Groups items by order                    |
+
+**Result:**
+
+```json
+{
+  "id": 123,
+  "email": "customer@example.com",
+  "total": "109.97",
+  "created_at": "2024-12-16T...",
+  "items": [
+    { "name": "Product A", "quantity": 2, "price": "29.99" },
+    { "name": "Product B", "quantity": 1, "price": "49.99" }
+  ]
+}
+```
+
+---
+
+## Email Template Design
+
+```
+┌──────────────────────────────────────┐
+│                                      │
+│         Order Confirmed ✓            │  ← Black background, white text
+│                                      │
+├──────────────────────────────────────┤
+│                                      │
+│  ORDER #123                          │  ← Gray uppercase label
+│  Thank you for your order!           │
+│                                      │
+│  ┌────────────────────────────────┐  │
+│  │ Product Name           $59.98  │  │  ← Item row
+│  │ Qty: 2                         │  │
+│  ├────────────────────────────────┤  │
+│  │ Another Product        $49.99  │  │
+│  │ Qty: 1                         │  │
+│  └────────────────────────────────┘  │
+│                                      │
+│  ════════════════════════════════    │
+│  Total                   $109.97     │  ← Bold, larger text
+│                                      │
+│  Order placed: December 16, 2024     │
+│                                      │
+├──────────────────────────────────────┤
+│                                      │
+│  Questions? Reply to this email.     │  ← Gray background footer
+│  Mountify · Thank you for shopping   │
+│                                      │
+└──────────────────────────────────────┘
+```
+
+---
+
+## Error Handling
+
+**Key principle:** Email failure should NOT affect order processing.
+
+```typescript
+try {
+  // Query order + send email
+} catch (emailError) {
+  // Log error but don't throw
+  console.error("Failed to send confirmation email:", emailError);
+}
+```
+
+**Why?**
+
+- Order is already paid and recorded
+- Customer can still see order in their order history
+- Email can be resent manually if needed
+- Webhook should return 200 to Stripe
+
+---
+
+## File Changes Summary
+
+| File                                   | Change                                                                                     |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `src/lib/email.ts`                     | Added `OrderItem`, `OrderEmailData` interfaces and `sendOrderConfirmationEmail()` function |
+| `src/app/api/webhooks/stripe/route.ts` | Added import, order query, and email sending after payment confirmation                    |
+
+---
+
+## Testing
+
+1. Add a product to cart
+2. Complete checkout with Stripe test card (`4242 4242 4242 4242`)
+3. Check email inbox for confirmation
+4. Verify order details match (items, quantities, total)
+
+**Test card numbers:**
+
+- Success: `4242 4242 4242 4242`
+- Decline: `4000 0000 0000 0002`
+
+---
+
+## Dependencies
+
+- **Resend** - Already configured in Step 5e (password reset)
+- **Environment variables** - Already set:
+  - `RESEND_API_KEY`
+  - `EMAIL_FROM`
+
+---
+
+_Step 5g completed: 12/17 2025_

@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { query } from "@/lib/db";
+import { sendOrderConfirmationEmail } from "@/lib/email";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2025-11-17.clover",
@@ -39,6 +40,40 @@ export async function POST(req: Request) {
             "UPDATE orders SET status = $1 WHERE stripe_session_id = $2",
             ["paid", session.id]
           );
+
+          // get order detail and send email
+          try {
+            const orderResult = await query(
+              `SELECT o.id, o.email, o.total, o.created_at,
+                      json_agg(json_build_object(
+                        'name', p.name,
+                        'quantity', oi.quantity,
+                        'price', oi.price
+                      )
+                        ORDER BY oi.id ASC
+                      ) as items
+              FROM orders o
+              JOIN order_items oi ON o.id = oi.order_id
+              JOIN products p ON oi.product_id = p.id
+              WHERE o.stripe_session_id = $1
+              GROUP BY o.id`,
+              [session.id]
+            );
+
+            if (orderResult.rows.length > 0) {
+              const order = orderResult.rows[0];
+              await sendOrderConfirmationEmail({
+                orderId: order.id,
+                email: order.email,
+                total: parseFloat(order.total),
+                items: order.items,
+                createdAt: order.created_at,
+              });
+              console.log(`Confirmation email sent for order #${order.id}`);
+            }
+          } catch (emailError) {
+            console.error("Failed to send confirmation email:", emailError);
+          }
           
           console.log(`Order paid for session: ${session.id}`);
         }
