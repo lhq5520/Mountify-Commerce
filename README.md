@@ -1,3 +1,5 @@
+# ![DEMO](/public/images/DEMO.png)
+
 # Mountify – Quick Start Guide
 
 Mountify is a full‑stack e‑commerce demo built with Next.js App Router, TypeScript, PostgreSQL (Neon), NextAuth, and Stripe Checkout + Webhooks. This Readme is a concise, developer‑focused handoff derived from the full project README, intended for day‑to‑day setup, running, and troubleshooting.
