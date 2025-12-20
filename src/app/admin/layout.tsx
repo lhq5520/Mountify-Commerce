@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   FolderTree,
   Warehouse,
+  Truck,
 } from "lucide-react";
 
 const navItems = [
@@ -35,6 +36,7 @@ const navItems = [
     href: "/admin/orders",
     icon: ShoppingCart,
   },
+  { label: "Shipping", href: "/admin/shipping", icon: Truck },
   {
     label: "Analytics",
     href: "/admin/analytics",

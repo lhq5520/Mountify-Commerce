@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Package, Save, AlertTriangle, CheckCircle } from "lucide-react";
+import {
+  Package,
+  Save,
+  AlertTriangle,
+  CheckCircle,
+  Warehouse,
+} from "lucide-react";
 import { useToast } from "@/app/context/ToastContext";
 
 interface InventoryItem {
@@ -18,6 +24,7 @@ export default function InventoryPage() {
   const { showToast } = useToast();
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -29,12 +36,16 @@ export default function InventoryPage() {
   async function fetchInventory() {
     try {
       const res = await fetch("/api/admin/inventory");
-      if (res.ok) {
-        const data = await res.json();
-        setInventory(data.inventory);
+      if (!res.ok) {
+        throw new Error("Failed to fetch inventory");
       }
+
+      const data = await res.json();
+      setInventory(data.inventory);
+      setError(null);
     } catch (e) {
       console.error("Failed to fetch inventory:", e);
+      setError("Failed to load inventory");
       showToast("Failed to load inventory", "error");
     } finally {
       setLoading(false);
@@ -91,33 +102,61 @@ export default function InventoryPage() {
     return { label: "In Stock", color: "text-green-600 bg-green-50" };
   }
 
+  if (loading) {
+    return (
+      <div className="container-custom py-10 md:py-14">
+        <div className="h-8 w-48 rounded bg-gray-200 animate-pulse mb-8" />
+        <div className="rounded-2xl bg-white shadow-sm border border-[var(--color-border)] overflow-hidden">
+          <div className="p-8 space-y-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-12 bg-gray-200 rounded animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div>
+    <div className="container-custom py-10 md:py-14">
       {/* Header */}
-      <header className="mb-8 flex items-center justify-between">
+      <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-[var(--color-text-primary)]">
+          <div className="flex items-center gap-2 mb-2">
+            <Warehouse
+              size={20}
+              className="text-[var(--color-text-secondary)]"
+            />
+            <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-tertiary)]">
+              Admin Panel
+            </p>
+          </div>
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-[var(--color-text-primary)]">
             Inventory
           </h1>
-          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
             Manage product stock levels
           </p>
         </div>
       </header>
 
+      {/* Error State */}
+      {error && (
+        <div className="mb-6 rounded-2xl bg-red-50 border border-red-200 px-6 py-4 text-sm text-red-600">
+          {error}
+        </div>
+      )}
+
       {/* Table */}
       <div className="rounded-2xl bg-white shadow-sm border border-[var(--color-border)] overflow-hidden">
-        {loading ? (
-          <div className="p-8 space-y-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />
-            ))}
-          </div>
-        ) : inventory.length === 0 ? (
-          <div className="p-12 text-center">
+        {inventory.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-white/70 px-6 py-12 text-center">
             <Package size={48} className="mx-auto text-gray-300 mb-4" />
-            <p className="text-[var(--color-text-secondary)]">
+            <p className="text-sm font-medium text-[var(--color-text-primary)] mb-2">
               No products found
+            </p>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              Products will appear here once they are added.
             </p>
           </div>
         ) : (

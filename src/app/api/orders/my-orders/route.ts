@@ -24,6 +24,12 @@ export async function GET() {
         o.total,
         o.status,
         o.created_at,
+        o.tracking_number,
+        o.carrier,
+        o.shipped_at,
+        o.tracking_details,
+        o.shipping_name,
+        o.shipping_address,
         oi.product_id,
         oi.quantity,
         oi.price as item_price,
@@ -49,6 +55,13 @@ export async function GET() {
           total: parseFloat(row.total),
           status: row.status,
           createdAt: row.created_at,
+          // new shipping info
+          trackingNumber: row.tracking_number,
+          carrier: row.carrier,
+          shippedAt: row.shipped_at,
+          trackingDetails: row.tracking_details,
+          shippingName: row.shipping_name,
+          shippingAddress: row.shipping_address,
           items: []
         });
       }

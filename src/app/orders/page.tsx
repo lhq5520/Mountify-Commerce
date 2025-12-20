@@ -4,7 +4,15 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Package, ShoppingBag } from "lucide-react";
+import { Package, ShoppingBag, Truck, ExternalLink } from "lucide-react";
+import {
+  CARRIERS,
+  getTrackingUrl,
+  getStatusText,
+  getStatusColor,
+} from "@/lib/tracking";
+
+type CarrierCode = keyof typeof CARRIERS;
 
 interface OrderItem {
   productId: number;
@@ -21,6 +29,13 @@ interface Order {
   status: string;
   createdAt: string;
   items: OrderItem[];
+  // 物流信息
+  trackingNumber: string | null;
+  carrier: string | null;
+  shippedAt: string | null;
+  trackingDetails: any | null;
+  shippingName: string | null;
+  shippingAddress: any | null;
 }
 
 export default function MyOrdersPage() {
@@ -58,6 +73,54 @@ export default function MyOrdersPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // 获取订单状态显示
+  function getOrderStatusBadge(order: Order) {
+    const status = order.status;
+
+    if (status === "delivered") {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-600" />
+          Delivered
+        </span>
+      );
+    }
+
+    if (status === "shipped") {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-100 px-3 py-1 text-xs font-medium text-purple-700">
+          <Truck size={12} />
+          Shipped
+        </span>
+      );
+    }
+
+    if (status === "paid") {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+          Processing
+        </span>
+      );
+    }
+
+    if (status === "pending") {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-yellow-600" />
+          Pending
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+        <span className="h-1.5 w-1.5 rounded-full bg-gray-600" />
+        {status}
+      </span>
+    );
   }
 
   // Loading state
@@ -183,26 +246,56 @@ export default function MyOrdersPage() {
                     </div>
 
                     {/* Status Badge */}
-                    <div>
-                      {order.status === "paid" ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
-                          <span className="h-1.5 w-1.5 rounded-full bg-green-600" />
-                          Payment Confirmed
-                        </span>
-                      ) : order.status === "pending" ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-700">
-                          <span className="h-1.5 w-1.5 rounded-full bg-yellow-600" />
-                          Pending
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                          <span className="h-1.5 w-1.5 rounded-full bg-gray-600" />
-                          {order.status}
-                        </span>
-                      )}
-                    </div>
+                    <div>{getOrderStatusBadge(order)}</div>
                   </div>
                 </div>
+
+                {/* Tracking Info (if shipped) */}
+                {order.trackingNumber && order.carrier && (
+                  <div className="px-5 py-3 bg-purple-50 border-b border-purple-100">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <Truck size={18} className="text-purple-600" />
+                        <div>
+                          <p className="text-xs text-purple-600 font-medium">
+                            {CARRIERS[order.carrier as CarrierCode]?.name ||
+                              order.carrier}
+                          </p>
+                          <a
+                            href={getTrackingUrl(
+                              order.carrier as CarrierCode,
+                              order.trackingNumber
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-sm font-medium text-purple-700 hover:underline"
+                          >
+                            {order.trackingNumber}
+                            <ExternalLink size={12} />
+                          </a>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        {order.trackingDetails && (
+                          <span
+                            className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                              order.trackingDetails.status
+                            )}`}
+                          >
+                            {getStatusText(order.trackingDetails.status)}
+                          </span>
+                        )}
+                        {order.shippedAt && (
+                          <p className="text-xs text-purple-600 mt-1">
+                            Shipped{" "}
+                            {new Date(order.shippedAt).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Order Items */}
                 <div className="px-5 py-4">

@@ -50,10 +50,31 @@ export async function POST(req: Request) {
         // 1.check is payment status is successful
         if (session.payment_status === "paid") {
           // update order status
-          await query(
-            "UPDATE orders SET status = $1 WHERE stripe_session_id = $2 AND status = 'pending' ",
-            ["paid", session.id]
+          // Save shipping snapshot (only when paid)
+          const shippingAddress = session.customer_details?.address ?? null;
+          const shippingName = session.customer_details?.name ?? null;
+          const shippingPhone = session.customer_details?.phone ?? null;
+
+          const updateRes = await query(
+            `UPDATE orders 
+            SET status = 'paid',
+                shipping_name = $2,
+                shipping_phone = $3,
+                shipping_address = $4,
+                updated_at = NOW()
+            WHERE stripe_session_id = $1
+              AND status = 'pending'
+            RETURNING id`,
+            [session.id, shippingName, shippingPhone, shippingAddress]
           );
+
+          if (updateRes.rows.length === 0) {
+            // already processed OR order not found
+            console.log(`[webhook] orders not updated for session ${session.id} (maybe already paid/expired/cancelled or missing)`);
+          } else {
+            console.log(`[webhook] order paid + snapshot saved, orderId=${updateRes.rows[0].id}`);
+          }
+
 
           console.log(`Order paid for session: ${session.id}`);
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, Package } from "lucide-react";
+import { ChevronDown, ChevronUp, ShoppingCart } from "lucide-react";
 
 type OrderItem = {
   productId: number;
@@ -72,7 +72,10 @@ export default function AdminOrdersPage() {
       {/* Header */}
       <header className="mb-6 md:mb-8">
         <div className="flex items-center gap-2 mb-2">
-          <Package size={20} className="text-[var(--color-text-secondary)]" />
+          <ShoppingCart
+            size={20}
+            className="text-[var(--color-text-secondary)]"
+          />
           <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-tertiary)]">
             Admin Panel
           </p>
