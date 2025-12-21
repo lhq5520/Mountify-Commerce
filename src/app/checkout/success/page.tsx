@@ -3,16 +3,19 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useCart } from "@/app/context/CartContext";
 
 export default function CheckoutSuccessPage() {
   const params = useSearchParams();
   const sessionId = params.get("session_id");
+  const { clearCart } = useCart();
 
   // State management
   const [status, setStatus] = useState<string>("pending");
   const [attemptCount, setAttemptCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<number | null>(null);
+  const [cartCleared, setCartCleared] = useState(false);
 
   // New state to record user's order total and email
   const [email, setEmail] = useState<string | null>(null);
@@ -84,6 +87,14 @@ export default function CheckoutSuccessPage() {
       clearInterval(timerId);
     };
   }, [sessionId]); // Only depend on sessionId
+
+  // Clear cart once payment is confirmed
+  useEffect(() => {
+    if (status === "paid" && !cartCleared) {
+      clearCart();
+      setCartCleared(true);
+    }
+  }, [status, cartCleared, clearCart]);
 
   return (
     <main className="bg-gradient-to-b from-[#f0f4ff] to-white min-h-[calc(100vh-64px)] flex justify-center px-4 py-10">

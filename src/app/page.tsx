@@ -7,9 +7,9 @@ const IS_SALE = false;
 
 const NORMAL_HERO = {
   badge: "Designed for drivers",
-  title: "Premium parts.\nBuilt for real driving.",
+  title: "Premium Parts.\nBuilt For Real Driving.",
   subtitle:
-    "Minimal, purpose-built hardware for people who actually enjoy being behind the wheel — from phone mounts to aero and chassis upgrades.",
+    "Minimal, purpose-built phone mounts and driver essentials.\nDesigned for people who actually enjoy driving.",
   primaryCta: "Shop now",
   secondaryCta: "Explore products",
   imageSrc: "/images/home.JPG",
@@ -52,17 +52,17 @@ export default function Home() {
           <div className="container-custom">
             <div className="max-w-xl space-y-6">
               {/* badge */}
-              <p className="inline-flex items-center rounded-full bg-white/10 px-4 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-white/80">
+              <p className="inline-flex items-center rounded-full bg-white/10 px-4 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-white/70">
                 {HERO.badge}
               </p>
 
               {/* title */}
-              <h1 className="whitespace-pre-line text-3xl md:text-5xl font-semibold tracking-tight text-white">
+              <h1 className="whitespace-pre-line text-balance text-3xl md:text-[46px] lg:text-[56px] font-semibold leading-[1.03] tracking-[-0.015em] text-white drop-shadow-md">
                 {HERO.title}
               </h1>
 
               {/* subtitle */}
-              <p className="text-sm md:text-base text-white/80 leading-relaxed max-w-lg">
+              <p className="whitespace-pre-line text-base md:text-lg text-balance text-white/85 leading-relaxed tracking-[0.01em] max-w-xl md:max-w-2xl">
                 {HERO.subtitle}
               </p>
 
@@ -88,18 +88,24 @@ export default function Home() {
       </section>
 
       {/* Brand story section (content unchanged, placeholder text) */}
-      <section className="bg-gradient-to-b from-black to-[#050509] text-white/80 py-10 md:py-14">
-        <div className="container-custom max-w-3xl text-sm md:text-base leading-relaxed">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/40 mb-2">
+      <section className="relative overflow-hidden bg-gradient-to-b from-[#f6f7fb] via-[#f1f2f6] to-[#e7e9ef] text-slate-900 py-10 md:py-14">
+        {/* Subtle top fade to tie into darker hero image */}
+        <div
+          className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/8 via-transparent to-transparent"
+          aria-hidden
+        />
+
+        <div className="relative container-custom max-w-3xl text-sm md:text-base leading-relaxed md:leading-7 text-slate-800 text-pretty">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 mb-2">
             Our story
           </p>
-          <p>
+          <p className="text-slate-700">
             Mountify started as a small experiment in a parking lot — trying to
             mount a phone and data without rattles, clutter, or cheap plastic.
             We now design small-batch hardware focused on feel, everyday
             usability, and clean integration with modern interiors.
           </p>
-          <p className="mt-3">
+          <p className="mt-3 text-slate-700">
             No fake carbon, no loud branding. Just parts that make your car
             nicer to live with and more fun to drive.
           </p>
