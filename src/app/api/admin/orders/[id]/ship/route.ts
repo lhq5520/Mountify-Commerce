@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { query } from "@/lib/db";
 import { fetchTrackingInfo, CARRIERS, CarrierCode } from "@/lib/tracking";
+import { sendShipmentNotificationEmail } from "@/lib/email";
 
 // POST /api/admin/orders/:id/ship - Ship order
 export async function POST(
@@ -116,7 +117,30 @@ export async function POST(
       );
     }
 
-    // TODO: Send shipment notification email (implement next)
+    // Send shipment notification email (best-effort, do not block response)
+    try {
+      const shippedRow = result.rows[0];
+      const trackingUrl = CARRIERS[carrier as CarrierCode]?.trackingUrl
+        ? `${CARRIERS[carrier as CarrierCode].trackingUrl}${trackingNumber}`
+        : "";
+
+      const emailResult = await sendShipmentNotificationEmail({
+        orderId: shippedRow.id,
+        email: order.email,
+        carrier,
+        trackingNumber,
+        trackingUrl,
+        shippedAt: shippedRow.shipped_at ?? new Date().toISOString(),
+      });
+
+      if (!emailResult.success) {
+        console.error("Failed to send shipment email:", emailResult.error);
+      } else {
+        console.log(`Shipment email sent for order #${shippedRow.id}`);
+      }
+    } catch (emailErr) {
+      console.error("Shipment email exception:", emailErr);
+    }
 
     return NextResponse.json({
       message: "Order shipped successfully",

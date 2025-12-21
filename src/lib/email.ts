@@ -14,6 +14,15 @@ interface OrderEmailData {
   createdAt: string;
 }
 
+interface ShipmentEmailData {
+  orderId: number;
+  email: string;
+  carrier: string;
+  trackingNumber: string;
+  trackingUrl?: string;
+  shippedAt: string | Date;
+}
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const EMAIL_FROM = process.env.EMAIL_FROM || "onboarding@resend.dev";
@@ -182,6 +191,88 @@ export async function sendOrderConfirmationEmail(data: OrderEmailData) {
     return { success: true, data: result };
   } catch (e: any) {
     console.error("Order confirmation email exception:", e);
+    return { success: false, error: e };
+  }
+}
+
+export async function sendShipmentNotificationEmail(data: ShipmentEmailData) {
+  const { orderId, email, carrier, trackingNumber, trackingUrl, shippedAt } = data;
+
+  if (!process.env.RESEND_API_KEY) {
+    console.error("RESEND_API_KEY is not set; skipping shipment email");
+    return { success: false, error: "Missing RESEND_API_KEY" } as const;
+  }
+
+  const shippedDateText = new Date(shippedAt).toLocaleString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const safeTrackingUrl = trackingUrl || "";
+
+  try {
+    const { data: result, error } = await resend.emails.send({
+      from: EMAIL_FROM,
+      to: email,
+      subject: `Your order #${orderId} has shipped - Mountify`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          </head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f7; padding: 40px 20px; margin: 0;">
+            <div style="max-width: 520px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+              <div style="background: #000; padding: 28px 32px; text-align: center;">
+                <h1 style="margin: 0; font-size: 24px; font-weight: 600; color: #fff;">On the way</h1>
+              </div>
+
+              <div style="padding: 32px;">
+                <p style="margin: 0 0 8px; font-size: 13px; color: #86868b; text-transform: uppercase; letter-spacing: 0.5px;">
+                  Order #${orderId}
+                </p>
+                <p style="margin: 0 0 16px; font-size: 15px; color: #424245;">
+                  Your order has shipped. Here are your tracking details:
+                </p>
+
+                <div style="padding: 16px; border: 1px solid #e5e5e5; border-radius: 12px; background: #fafafa;">
+                  <p style="margin: 0 0 8px; font-size: 15px; color: #1d1d1f;">
+                    Carrier: <strong>${carrier}</strong>
+                  </p>
+                  <p style="margin: 0 0 12px; font-size: 15px; color: #1d1d1f;">
+                    Tracking #: <strong>${trackingNumber}</strong>
+                  </p>
+                  ${safeTrackingUrl ? `<a href="${safeTrackingUrl}" style="display: inline-block; margin-top: 4px; padding: 12px 18px; background: #000; color: #fff; border-radius: 10px; text-decoration: none; font-size: 14px; font-weight: 600;">Track package</a>` : ""}
+                </div>
+
+                <p style="margin: 16px 0 0; font-size: 13px; color: #86868b;">
+                  Shipped on ${shippedDateText}
+                </p>
+              </div>
+
+              <div style="padding: 20px 32px; background: #f5f5f7; text-align: center;">
+                <p style="margin: 0; font-size: 13px; color: #86868b;">
+                  Thanks for shopping with Mountify.
+                </p>
+              </div>
+            </div>
+          </body>
+        </html>
+      `,
+    });
+
+    if (error) {
+      console.error("Shipment email error:", error);
+      return { success: false, error };
+    }
+
+    return { success: true, data: result };
+  } catch (e: any) {
+    console.error("Shipment email exception:", e);
     return { success: false, error: e };
   }
 }

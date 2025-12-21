@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { query } from "@/lib/db";
 
-// GET /api/admin/shipping - 获取发货相关订单
+// GET /api/admin/shipping - Fetch orders for shipping
 export async function GET() {
   try {
     const session = await auth();
@@ -10,7 +10,7 @@ export async function GET() {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
-    // 获取 paid, shipped, delivered 的订单
+    // Fetch orders with status: paid, shipped, delivered
     const result = await query(
       `SELECT 
         o.id,
@@ -69,7 +69,7 @@ export async function GET() {
     const orders = result.rows.map((row: any) => ({
       id: row.id,
       email: row.email,
-      // pg 的 numeric 常常是 string，这里统一成 number，避免前端/计算踩坑
+      // PostgreSQL numeric types are often strings, converting to number to avoid frontend/calculation issues
       total: Number(row.total),
       status: row.status,
       createdAt: row.created_at,
@@ -81,7 +81,7 @@ export async function GET() {
       shippingName: row.shipping_name,
       shippingPhone: row.shipping_phone,
       shippingAddress: row.shipping_address,
-      items: row.items, // SQL 已保证至少是 []
+      items: row.items, // SQL guarantees at least an empty array
     }));
 
     return NextResponse.json({ orders });
