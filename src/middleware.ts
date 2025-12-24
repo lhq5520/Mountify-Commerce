@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth"; 
+import type { NextRequest } from "next/server";
+import { getToken } from "next-auth/jwt";
 
-export default auth((req) => {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const token = req.auth;  // directly get session
 
-  // Protected routes that require login
+  // choose correct cookie name
+  const isSecure = req.url.startsWith('https');
+  
+  const token = await getToken({
+    req,
+    secret: process.env.AUTH_SECRET,
+    cookieName: isSecure ? "__Secure-authjs.session-token" : "authjs.session-token",
+  });
+
   const protectedRoutes = ['/orders', '/profile', '/settings'];
   const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
-
-  // Admin-only routes
   const isAdminRoute = pathname.startsWith('/admin');
 
   if (isProtectedRoute || isAdminRoute) {
@@ -19,14 +25,14 @@ export default auth((req) => {
       return NextResponse.redirect(signInUrl);
     }
 
-    if (isAdminRoute && token.user?.role !== 'admin') {
+    if (isAdminRoute && token.role !== 'admin') {
       const homeUrl = new URL('/', req.url);
       return NextResponse.redirect(homeUrl);
     }
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: [
