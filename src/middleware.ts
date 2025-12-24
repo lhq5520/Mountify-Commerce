@@ -1,54 +1,80 @@
 // src/middleware.ts
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
+/**
+ * Authentication & Authorization middleware
+ *
+ * - Uses Auth.js v5 `auth()` wrapper (Edge-safe, production-safe)
+ * - Protects user-only routes (orders / profile / settings)
+ * - Protects admin-only routes (admin / api/admin)
+ * - Avoids `getToken()` which is unreliable in Edge + secure cookie setups
+ */
 
-export async function middleware(req: NextRequest) {
+import { auth } from "@/auth";
+import { NextResponse } from "next/server";
+
+export default auth((req) => {
   const { pathname } = req.nextUrl;
 
-  // Get login info from JWT (Edge-safe)
-  const token = await getToken({
-    req,
-    // if not specify secret, there might have problems. defaults to NEXTAUTH_SECRET / AUTH_SECRET environment variable
-    secret: process.env.AUTH_SECRET
-  });
+  // `req.auth` is populated by Auth.js middleware wrapper
+  // - null/undefined -> not logged in
+  // - object -> logged in session
+  const isLoggedIn = !!req.auth;
 
+  /**
+   * Routes that require a logged-in user
+   */
+  const isProtectedRoute =
+    pathname.startsWith("/orders") ||
+    pathname.startsWith("/profile") ||
+    pathname.startsWith("/settings");
 
-  // Protected routes that require login
-  const protectedRoutes = ['/orders', '/profile', '/settings'];
-  const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
+  /**
+   * Routes that require admin privileges
+   * (admin pages + admin APIs)
+   */
+  const isAdminRoute =
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/api/admin");
 
-  // Admin-only routes
-  const isAdminRoute = pathname.startsWith('/admin');
+  /**
+   * If the user is NOT logged in and tries to access
+   * a protected or admin route, redirect to sign-in page
+   */
+  if ((isProtectedRoute || isAdminRoute) && !isLoggedIn) {
+    const signInUrl = new URL("/auth/signin", req.nextUrl.origin);
 
-  // Check if user is trying to access protected route
-  if (isProtectedRoute || isAdminRoute) {
-    // No token -> not logged in -> redirect to sign in
-    if (!token) {
-      const signInUrl = new URL('/auth/signin', req.url);
-      signInUrl.searchParams.set('callbackUrl', pathname);
-      return NextResponse.redirect(signInUrl);
-    }
+    // Preserve full URL so user can be redirected back after login
+    signInUrl.searchParams.set("callbackUrl", req.nextUrl.href);
 
-    // Has token, check admin permission
-    if (isAdminRoute && token.role !== 'admin') {
-      // Not admin → redirect to home
-      const homeUrl = new URL('/', req.url);
-      return NextResponse.redirect(homeUrl);
+    return NextResponse.redirect(signInUrl);
+  }
+
+  /**
+   * If user is logged in but tries to access admin-only routes,
+   * check role from session
+   */
+  if (isAdminRoute) {
+    const role = (req.auth?.user as any)?.role;
+
+    if (role !== "admin") {
+      // Non-admin users are redirected to home page
+      return NextResponse.redirect(new URL("/", req.nextUrl.origin));
     }
   }
 
-  // All checks passed → allow access
+  // All checks passed -> continue request
   return NextResponse.next();
-}
+});
 
-// Routes to apply middleware to
+/**
+ * Only run middleware on these routes
+ * (avoids unnecessary overhead on public pages and static assets)
+ */
 export const config = {
   matcher: [
-    '/orders/:path*',
-    '/profile/:path*', // haven't implemented -> future function
-    '/settings/:path*', // haven't implemented -> future function
-    '/admin/:path*',
-    '/api/admin/:path*', // second protection
+    "/orders/:path*",
+    "/profile/:path*",
+    "/settings/:path*",
+    "/admin/:path*",
+    "/api/admin/:path*",
   ],
 };
