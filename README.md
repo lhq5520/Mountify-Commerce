@@ -1,4 +1,6 @@
-# ![Mountify](/public/images/DEMO.png)
+<img src="/public/images/DEMO.png" alt="Mountify Demo" width="720" />
+
+<img src="/public/images/logo.png" alt="Logo" width="200" />
 
 # Mountify
 
@@ -12,6 +14,8 @@ A production-grade e-commerce platform built with Next.js
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 [English](#english) | [中文](#中文)
+
+📖 [View Documentation / 查阅文档](https://docs.mountify.shop)
 
 ---
 
