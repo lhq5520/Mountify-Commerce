@@ -1,7 +1,5 @@
 <img src="/public/images/DEMO.png" alt="Mountify Demo" width="720" />
 
-<img src="/public/images/logo.png" alt="Logo" width="200" />
-
 # Mountify
 
 A production-grade e-commerce platform built with Next.js
@@ -15,7 +13,9 @@ A production-grade e-commerce platform built with Next.js
 
 [English](#english) | [中文](#中文)
 
-📖 [View Documentation / 查阅文档](https://docs.mountify.shop)
+<a href="https://docs.mountify.shop" target="_blank">📖 View Documentation / 查阅文档</a>
+
+<img src="/public/images/logo.png" alt="Logo" width="200" />
 
 ---
 
@@ -80,7 +80,7 @@ Test card: `4242 4242 4242 4242`
 
 ### Documentation
 
-📖 [docs.mountify.shop](https://docs.mountify.shop)
+<a href="https://docs.mountify.shop" target="_blank">📖 docs.mountify.shop</a>
 
 ---
 
@@ -145,7 +145,7 @@ stripe listen --forward-to localhost:3000/api/webhooks/stripe
 
 ### 文档
 
-📖 [docs.mountify.shop](https://docs.mountify.shop)
+<a href="https://docs.mountify.shop" target="_blank">📖 docs.mountify.shop</a>
 
 ---
 
